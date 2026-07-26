@@ -1,0 +1,10 @@
+[submodule "src/memcached"]
+	path = src/memcached
+	url = https://github.com/memcached/memcached.git
+[submodule "src/rt-bench"]
+	path = src/rt-bench
+	url = https://gitlab.com/rt-bench/rt-bench.git
+	branch = wip/multithread-memwatcher
+[submodule "test/mutilate"]
+	path = test/mutilate
+	url = https://github.com/leverich/mutilate.git

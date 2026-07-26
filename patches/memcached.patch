@@ -1,0 +1,558 @@
+diff --git a/Makefile.am b/Makefile.am
+index a7a11ad..6495489 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -34,7 +34,14 @@ memcached_SOURCES = memcached.c memcached.h \
+                     proto_parser.c proto_parser.h \
+                     proto_parser_type.h \
+                     vendor/mcmc/mcmc.h \
+-                    vendor/mcmc/mcmc.c
++                    vendor/mcmc/mcmc.c \
++                    ../rt-bench/generator/src/memory_watcher.c \
++                    ../rt-bench/generator/include/memory_watcher.h \
++                    ../rt-bench/generator/src/logging.c \
++                    ../rt-bench/generator/include/logging.h \
++                    ../rt-bench/generator/src/dlmalloc/source/dlmalloc.c \
++                    ../rt-bench/generator/include/optional_features.h
++
+ 
+ if BUILD_SOLARIS_PRIVS
+ memcached_SOURCES += solaris_priv.c
+@@ -89,13 +96,13 @@ memcached_SOURCES += tls.c tls.h
+ endif
+ 
+ memcached_debug_SOURCES = $(memcached_SOURCES)
+-memcached_CPPFLAGS = -DNDEBUG
++memcached_CPPFLAGS = -DNDEBUG -I../rt-bench/generator/include/
+ memcached_debug_LDADD = @PROFILER_LDFLAGS@
+-memcached_debug_CFLAGS = @PROFILER_FLAGS@
++memcached_debug_CFLAGS = @PROFILER_FLAGS@ -I../rt-bench/generator/include/
+ 
+ memcached_LDADD =
+-memcached_LDFLAGS =
+-memcached_debug_LDFLAGS =
++memcached_LDFLAGS = -Wl,--wrap=free -Wl,--wrap=malloc -Wl,--wrap=mmap -I../rt-bench/generator/include/
++memcached_debug_LDFLAGS = $(memcached_LDFLAGS)
+ memcached_DEPENDENCIES =
+ memcached_debug_DEPENDENCIES =
+ CLEANFILES=
+diff --git a/memcached.c b/memcached.c
+index 8611661..dbb8e63 100644
+--- a/memcached.c
++++ b/memcached.c
+@@ -61,6 +61,8 @@
+ #include <sys/sysctl.h>
+ #endif
+ 
++#include "memory_watcher.h"
++
+ /*
+  * forward declarations
+  */
+@@ -214,6 +216,9 @@ void stats_reset(void) {
+ }
+ 
+ static void settings_init(void) {
++    settings.heap_size=0;
++    settings.heap_start=NULL;
++    settings.heap_location=NULL;
+     settings.use_cas = true;
+     settings.access = 0700;
+     settings.port = 11211;
+@@ -4067,6 +4072,7 @@ static void usage(void) {
+     printf("-F, --disable-flush-all   disable flush_all command\n");
+     printf("-X, --disable-dumping     disable stats cachedump, stats detail, and lru_crawler metadump\n");
+     printf("-W  --disable-watch       disable watch commands (live logging)\n");
++    printf("-w  --mem-watcher         enable rtbench's memory watcher with size[:start]:location\n");
+     printf("-Y, --auth-file=<file>    (EXPERIMENTAL) enable ASCII protocol authentication. format:\n"
+            "                          user:pass\\nuser2:pass2\\n\n");
+     printf("-e, --memory-file=<file>  (EXPERIMENTAL) mmap a file for item memory.\n"
+@@ -4944,6 +4950,7 @@ int main (int argc, char **argv) {
+           "e:"  /* mmap path for external item memory */
+           "o:"  /* Extended generic options */
+           "N:"  /* NAPI ID based thread selection */
++          "w:" /*memory watcher options, as size:[start:]location*/
+           ;
+ 
+     /* process arguments */
+@@ -4981,6 +4988,7 @@ int main (int argc, char **argv) {
+         {"disable-flush-all", no_argument, 0, 'F'},
+         {"disable-dumping", no_argument, 0, 'X'},
+         {"disable-watch", no_argument, 0, 'W'},
++        {"mem-watcher", required_argument, 0, 'w'},
+         {"auth-file", required_argument, 0, 'Y'},
+         {"memory-file", required_argument, 0, 'e'},
+         {"extended", required_argument, 0, 'o'},
+@@ -4999,6 +5007,60 @@ int main (int argc, char **argv) {
+             }
+         }
+         switch (c) {
++        case 'w':
++          int res;
++          char* size=optarg, *start=strstr(optarg,":"),*location=NULL;
++          if (start != NULL) {
++              start[0]='\0'; // put \0 instead of :
++              start++; // start is after the :
++              location=strstr(start,":"); // now try to find the location part
++            if (location != NULL) {
++              location[0]='\0'; // replace : with /0
++              location++; // location string starts after ':'
++            } else { // location was null the we omitted start
++              location=start;
++              start=NULL;
++            }
++          }
++          settings.heap_location = location;
++          char heap_size_magnitude='\0';
++          size_t heap_size=0;
++          void* heap_start=NULL;
++          if(start!=NULL){
++            res = sscanf(start, "%p", &heap_start);
++            if (res < 1 || res == EOF) {
++              perror("Error during heap_start argument parsing");
++              exit(EX_USAGE);
++            }
++          }
++          settings.heap_start=heap_start;
++          res = sscanf(size, "%zu%1c", &heap_size, &heap_size_magnitude);
++          if (res < 1 || res == EOF) {
++            perror(
++                   "Error during heap_size argument parsing");
++            exit(EX_USAGE);
++          }
++          /*we convert the parsed value in bytes save it as an execution option.
++           * breaks are omitted to obtain a proper conversion in bytes. */
++          switch (heap_size_magnitude) {
++          case 'g':
++          case 'G':
++            heap_size *= 1024;
++          case 'm':
++          case 'M':
++            heap_size *= 1024;
++          case 'k':
++          case 'K':
++            heap_size *= 1024;
++          case '\0':
++            heap_size = heap_size;
++            break;
++          default:
++            fprintf(stderr, "Size magnitude can must be in K, M or G\n");
++            exit(EX_USAGE);
++          }
++          settings.heap_size=heap_size;
++          break;
+         case 'A':
+             /* enables "shutdown" command */
+             settings.shutdown_command = true;
+@@ -5660,22 +5722,38 @@ int main (int argc, char **argv) {
+         }
+     }
+ 
++    if(settings.heap_size != 0){
++      start_memory_watcher(settings.heap_size,settings.heap_start,settings.heap_location);
++    }
++
+     if (settings.num_napi_ids > settings.num_threads) {
+         fprintf(stderr, "Number of napi_ids(%d) cannot be greater than number of threads(%d)\n",
+                 settings.num_napi_ids, settings.num_threads);
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_USAGE);
+     }
+ 
+     if (settings.item_size_max < ITEM_SIZE_MAX_LOWER_LIMIT) {
+         fprintf(stderr, "Item max size cannot be less than 1024 bytes.\n");
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_USAGE);
+     }
+     if (settings.item_size_max > (settings.maxbytes / 2)) {
+         fprintf(stderr, "Cannot set item size limit higher than 1/2 of memory max.\n");
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_USAGE);
+     }
+     if (settings.item_size_max > (ITEM_SIZE_MAX_UPPER_LIMIT)) {
+         fprintf(stderr, "Cannot set item size limit higher than a gigabyte.\n");
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_USAGE);
+     }
+     if (settings.item_size_max > 1024 * 1024) {
+@@ -5688,18 +5766,27 @@ int main (int argc, char **argv) {
+     if (settings.slab_chunk_size_max > settings.item_size_max) {
+         fprintf(stderr, "slab_chunk_max (bytes: %d) cannot be larger than -I (item_size_max %d)\n",
+                 settings.slab_chunk_size_max, settings.item_size_max);
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_USAGE);
+     }
+ 
+     if (settings.item_size_max % settings.slab_chunk_size_max != 0) {
+         fprintf(stderr, "-I (item_size_max: %d) must be evenly divisible by slab_chunk_max (bytes: %d)\n",
+                 settings.item_size_max, settings.slab_chunk_size_max);
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_USAGE);
+     }
+ 
+     if (settings.slab_page_size % settings.slab_chunk_size_max != 0) {
+         fprintf(stderr, "slab_chunk_max (bytes: %d) must divide evenly into %d (slab_page_size)\n",
+                 settings.slab_chunk_size_max, settings.slab_page_size);
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_USAGE);
+     }
+ #ifdef EXTSTORE
+@@ -5728,6 +5815,9 @@ int main (int argc, char **argv) {
+             }
+             meta->slab_config = temp;
+         } else {
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EX_USAGE);
+         }
+     } else if (!meta->slab_config) {
+@@ -5737,16 +5827,25 @@ int main (int argc, char **argv) {
+ 
+     if (settings.hot_lru_pct + settings.warm_lru_pct > 80) {
+         fprintf(stderr, "hot_lru_pct + warm_lru_pct cannot be more than 80%% combined\n");
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_USAGE);
+     }
+ 
+     if (settings.temp_lru && !start_lru_maintainer) {
+         fprintf(stderr, "temporary_ttl requires lru_maintainer to be enabled\n");
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_USAGE);
+     }
+ 
+     if (hash_init(hash_type) != 0) {
+         fprintf(stderr, "Failed to initialize hash_algorithm!\n");
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_USAGE);
+     }
+ 
+@@ -5766,12 +5865,18 @@ int main (int argc, char **argv) {
+         } else {
+             if (settings.binding_protocol != binary_prot) {
+                 fprintf(stderr, "ERROR: You cannot allow the ASCII protocol while using SASL.\n");
++                if(settings.heap_size != 0){
++                  stop_memory_watcher();
++                }
+                 exit(EX_USAGE);
+             }
+         }
+ 
+         if (settings.udpport) {
+             fprintf(stderr, "ERROR: Cannot enable UDP while using binary SASL authentication.\n");
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EX_USAGE);
+         }
+     }
+@@ -5782,6 +5887,9 @@ int main (int argc, char **argv) {
+         } else {
+             if (settings.binding_protocol != ascii_prot) {
+                 fprintf(stderr, "ERROR: You cannot allow the BINARY protocol while using ascii authentication tokens.\n");
++                if(settings.heap_size != 0){
++                  stop_memory_watcher();
++                }
+                 exit(EX_USAGE);
+             }
+         }
+@@ -5793,6 +5901,9 @@ int main (int argc, char **argv) {
+ 
+     if (settings.port > 65535) {
+         fprintf(stderr, "ERROR: Invalid port number %d.\n", settings.port);
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_USAGE);
+     }
+ 
+@@ -5803,6 +5914,9 @@ int main (int argc, char **argv) {
+     if (settings.ssl_enabled) {
+         if (!settings.port) {
+             fprintf(stderr, "ERROR: You cannot enable SSL without a TCP port.\n");
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EX_USAGE);
+         }
+         // Initiate the SSL context.
+@@ -5831,6 +5945,9 @@ int main (int argc, char **argv) {
+ 
+         if ((getrlimit(RLIMIT_CORE, &rlim) != 0) || rlim.rlim_cur == 0) {
+             fprintf(stderr, "failed to ensure corefile creation\n");
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EX_OSERR);
+         }
+     }
+@@ -5842,6 +5959,9 @@ int main (int argc, char **argv) {
+ 
+     if (getrlimit(RLIMIT_NOFILE, &rlim) != 0) {
+         fprintf(stderr, "failed to getrlimit number of files\n");
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_OSERR);
+     } else {
+         rlim.rlim_cur = settings.maxconns;
+@@ -5849,6 +5969,9 @@ int main (int argc, char **argv) {
+         if (setrlimit(RLIMIT_NOFILE, &rlim) != 0) {
+ #ifndef MEMCACHED_DEBUG
+             fprintf(stderr, "failed to set rlimit for open files. Try starting as root or requesting smaller maxconns value.\n");
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EX_OSERR);
+ #endif
+         }
+@@ -5858,10 +5981,16 @@ int main (int argc, char **argv) {
+     if (getuid() == 0 || geteuid() == 0) {
+         if (username == 0 || *username == '\0') {
+             fprintf(stderr, "must add '-u root' to start as root\n");
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EX_USAGE);
+         }
+         if ((pw = getpwnam(username)) == 0) {
+             fprintf(stderr, "can't find the user %s to switch to\n", username);
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EX_NOUSER);
+         }
+         if (setgroups(0, NULL) < 0) {
+@@ -5875,11 +6004,17 @@ int main (int argc, char **argv) {
+             fprintf(stderr, "failed to drop supplementary groups: %s\n",
+                     strerror(errno));
+             if (should_exit) {
++                if(settings.heap_size != 0){
++                  stop_memory_watcher();
++                }
+                 exit(EX_OSERR);
+             }
+         }
+         if (setgid(pw->pw_gid) < 0 || setuid(pw->pw_uid) < 0) {
+             fprintf(stderr, "failed to assume identity of user %s\n", username);
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EX_OSERR);
+         }
+     }
+@@ -5894,6 +6029,9 @@ int main (int argc, char **argv) {
+     if (do_daemonize) {
+         if (daemonize(maxcore, settings.verbose) == -1) {
+             fprintf(stderr, "failed to daemon() in order to daemonize\n");
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EXIT_FAILURE);
+         }
+     }
+@@ -5928,6 +6066,9 @@ int main (int argc, char **argv) {
+     if (settings.auth_file) {
+         if (settings.udpport) {
+             fprintf(stderr, "Cannot use UDP with ascii authentication enabled (-U 0 to disable)\n");
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EX_USAGE);
+         }
+ 
+@@ -5935,19 +6076,31 @@ int main (int argc, char **argv) {
+             case AUTHFILE_STATFAIL:
+                 vperror("Could not stat authfile [%s], error %s", settings.auth_file
+                                                             , strerror(errno));
++                if(settings.heap_size != 0){
++                  stop_memory_watcher();
++                }
+                 exit(EXIT_FAILURE);
+                 break;
+             case AUTHFILE_OPENFAIL:
+                 vperror("Could not open authfile [%s] for reading, error %s", settings.auth_file
+                                                                            , strerror(errno));
++                if(settings.heap_size != 0){
++                  stop_memory_watcher();
++                }
+                 exit(EXIT_FAILURE);
+                 break;
+             case AUTHFILE_OOM:
+                 fprintf(stderr, "Out of memory reading password file: %s", settings.auth_file);
++                if(settings.heap_size != 0){
++                  stop_memory_watcher();
++                }
+                 exit(EXIT_FAILURE);
+                 break;
+             case AUTHFILE_MALFORMED:
+                 fprintf(stderr, "Authfile [%s] has a malformed entry. Should be 'user:password'", settings.auth_file);
++                if(settings.heap_size != 0){
++                  stop_memory_watcher();
++                }
+                 exit(EXIT_FAILURE);
+                 break;
+             case AUTHFILE_OK:
+@@ -6029,6 +6182,9 @@ int main (int argc, char **argv) {
+      */
+     if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
+         perror("failed to ignore SIGPIPE; sigaction");
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EX_OSERR);
+     }
+     /* start up worker threads if MT mode */
+@@ -6048,25 +6204,40 @@ int main (int argc, char **argv) {
+ #ifdef PROXY
+     if (settings.proxy_enabled) {
+         if (proxy_first_confload(settings.proxy_ctx) != 0) {
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EXIT_FAILURE);
+         }
+     }
+ #endif
+ 
+     if (start_assoc_maint && start_assoc_maintenance_thread() == -1) {
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EXIT_FAILURE);
+     }
+     if (start_lru_crawler && start_item_crawler_thread() != 0) {
+         fprintf(stderr, "Failed to enable LRU crawler thread\n");
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EXIT_FAILURE);
+     }
+ #ifdef EXTSTORE
+     if (storage && start_storage_compact_thread(storage) != 0) {
+         fprintf(stderr, "Failed to start storage compaction thread\n");
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EXIT_FAILURE);
+     }
+     if (storage && start_storage_write_thread(storage) != 0) {
+         fprintf(stderr, "Failed to start storage writer thread\n");
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EXIT_FAILURE);
+     }
+ 
+@@ -6082,11 +6253,17 @@ int main (int argc, char **argv) {
+     if (settings.slab_reassign) {
+         settings.slab_rebal = start_slab_maintenance_thread(storage);
+         if (!settings.slab_rebal) {
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EXIT_FAILURE);
+         }
+     }
+ 
+     if (settings.idle_timeout && start_conn_timeout_thread() == -1) {
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EXIT_FAILURE);
+     }
+ 
+@@ -6117,6 +6294,9 @@ int main (int argc, char **argv) {
+         errno = 0;
+         if (server_socket_unix(settings.socketpath,settings.access)) {
+             vperror("failed to listen on UNIX socket: %s", settings.socketpath);
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EX_OSERR);
+         }
+     }
+@@ -6133,6 +6313,9 @@ int main (int argc, char **argv) {
+             temp_portnumber_filename = malloc(len);
+             if (temp_portnumber_filename == NULL) {
+                 vperror("Failed to allocate memory for portnumber file");
++                if(settings.heap_size != 0){
++                  stop_memory_watcher();
++                }
+                 exit(EX_OSERR);
+             }
+             snprintf(temp_portnumber_filename,
+@@ -6155,6 +6338,9 @@ int main (int argc, char **argv) {
+                 vperror("failed to listen on one of interface(s) %s", settings.inter);
+             }
+             free(temp_portnumber_filename);
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EX_OSERR);
+         }
+ 
+@@ -6175,6 +6361,9 @@ int main (int argc, char **argv) {
+                 vperror("failed to listen on one of interface(s) %s", settings.inter);
+             }
+             free(temp_portnumber_filename);
++            if(settings.heap_size != 0){
++              stop_memory_watcher();
++            }
+             exit(EX_OSERR);
+         }
+ 
+@@ -6192,6 +6381,9 @@ int main (int argc, char **argv) {
+     usleep(1000);
+     if (stats_state.curr_conns + stats_state.reserved_fds >= settings.maxconns - 1) {
+         fprintf(stderr, "Maxconns setting is too low, use -c to increase.\n");
++        if(settings.heap_size != 0){
++          stop_memory_watcher();
++        }
+         exit(EXIT_FAILURE);
+     }
+ 
+@@ -6247,6 +6439,9 @@ int main (int argc, char **argv) {
+     if (settings.inter)
+       free(settings.inter);
+ 
++    if(settings.heap_size != 0){
++      stop_memory_watcher();
++    }
+     /* cleanup base */
+     event_base_free(main_base);
+ 
+diff --git a/memcached.h b/memcached.h
+index 1dc817b..5593be7 100644
+--- a/memcached.h
++++ b/memcached.h
+@@ -468,6 +468,9 @@ struct stats_state {
+  * Globally accessible settings as derived from the commandline.
+  */
+ struct settings {
++    size_t heap_size;
++    void* heap_start;
++    char* heap_location;
+     size_t maxbytes;
+     int maxconns;
+     int port;
