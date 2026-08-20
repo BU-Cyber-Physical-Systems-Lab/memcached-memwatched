@@ -3,10 +3,9 @@
 #
 # @file
 # @version 0.1
-.ONESHELL:
 SHELL:= bash
 .SHELLFLAGS:= -eu -o pipefail -c
-.PHONY: clean setup all
+.PHONY: clean setup all clean-rt-bench clean-memcached clean-mutilate
 
 BASE_FLDR=$(abspath $(lastword $(dir $(MAKEFILE_LIST))))
 PATCH_FLDR=$(BASE_FLDR)/patches
@@ -28,12 +27,10 @@ $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c:
 	@git submodule update --init $(RTBENCH_SRC_FLDR)/dlmalloc
 
 $(MEMCACHED_SRC_FLDR)/configure:
-	cd $(MEMCACHED_SRC_FLDR)
-	./autogen.sh
+	cd $(MEMCACHED_SRC_FLDR) && ./autogen.sh
 
 $(MEMCACHED_SRC_FLDR)/Makefile: $(MEMCACHED_SRC_FLDR)/Makefile.am $(MEMCACHED_SRC_FLDR)/configure
-	cd $(MEMCACHED_SRC_FLDR)
-	./configure
+	cd $(MEMCACHED_SRC_FLDR) &&	./configure $(CONFIGURE_OPTS)
 
 $(BIN_FLDR)/memcached-debug $(BIN_FLDR)/memcached: $(MEMCACHED_SRC_FLDR)/Makefile $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MEMCACHED_SRC_FLDR)/*.c $(MEMCACHED_SRC_FLDR)/*.h
 	@mkdir -p bin
@@ -52,13 +49,23 @@ $(BIN_FLDR)/mutilate: $(MUTILATE_SRC_FLDR)/README.md  $(MUTILATE_SRC_FLDR)/*.cc 
 	scons -C $(MUTILATE_SRC_FLDR)
 	cp $(MUTILATE_SRC_FLDR)/mutilate bin/
 
-clean:
+clean: clean-rt-bench clean-memcached clean-mutilate
 	rm -rf bin
-	make -C $(MEMCACHED_SRC_FLDR) clean
+
+clean-memcached:
+	-make -C $(MEMCACHED_SRC_FLDR) clean
 	git -C $(MEMCACHED_SRC_FLDR) restore .
+	git -C $(MEMCACHED_SRC_FLDR) clean -fxd
+
+clean-rt-bench:
+	make -C src/rt-bench clean
 	git -C $(RTBENCH_SRC_FLDR)/dlmalloc restore .
+	git -C $(RTBENCH_SRC_FLDR) clean -fxd
 	@git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/mutilate.patch --check --reverse || git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/mutilate.patch
-	scons -C $(MUTILATE_SRC_FLDR) -c clean
+
+clean-mutilate:
+	-scons -C $(MUTILATE_SRC_FLDR) -c clean
 	git -C $(MUTILATE_SRC_FLDR) restore .
+	git -C $(MUTILATE_SRC_FLDR) clean -fxd
 
 # end
