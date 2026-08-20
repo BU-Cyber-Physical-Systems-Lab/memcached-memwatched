@@ -1,5 +1,5 @@
 diff --git a/Makefile.am b/Makefile.am
-index a7a11ad..bad40f8 100644
+index a7a11ad..625e6ba 100644
 --- a/Makefile.am
 +++ b/Makefile.am
 @@ -34,7 +34,14 @@ memcached_SOURCES = memcached.c memcached.h \
@@ -23,15 +23,17 @@ index a7a11ad..bad40f8 100644
  
  memcached_debug_SOURCES = $(memcached_SOURCES)
 -memcached_CPPFLAGS = -DNDEBUG
-+memcached_CPPFLAGS = -DNDEBUG -I../rt-bench/generator/include/ -I../locusta_utils -I../page_migration
- memcached_debug_LDADD = @PROFILER_LDFLAGS@
+-memcached_debug_LDADD = @PROFILER_LDFLAGS@
 -memcached_debug_CFLAGS = @PROFILER_FLAGS@
++memcached_CPPFLAGS = -DNDEBUG -I../rt-bench/generator/include/ -I../locusta_utils -I../page_migration
++memcached_debug_LDADD = @PROFILER_LDFLAGS@ -lpage_migration_lib
 +memcached_debug_CFLAGS = @PROFILER_FLAGS@ -I../rt-bench/generator/include/ -I../locusta_utils -I../page_migration
  
- memcached_LDADD =
+-memcached_LDADD =
 -memcached_LDFLAGS =
 -memcached_debug_LDFLAGS =
-+memcached_LDFLAGS = -static -Wl,--wrap=free -Wl,--wrap=malloc -Wl,--wrap=mmap -I../rt-bench/generator/include/ -I../page_migration -L../page_migration -lpage_migration_lib -I../locusta_utils
++memcached_LDADD = -lpage_migration_lib
++memcached_LDFLAGS = -static -Wl,--wrap=free -Wl,--wrap=malloc -Wl,--wrap=mmap -I../rt-bench/generator/include/ -I../page_migration -L../page_migration -I../locusta_utils
 +memcached_debug_LDFLAGS = $(memcached_LDFLAGS)
  memcached_DEPENDENCIES =
  memcached_debug_DEPENDENCIES =

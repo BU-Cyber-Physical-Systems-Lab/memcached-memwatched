@@ -12,6 +12,7 @@ PATCH_FLDR=$(BASE_FLDR)/patches
 RTBENCH_SRC_FLDR=src/rt-bench/generator/src
 MEMCACHED_SRC_FLDR=src/memcached
 MUTILATE_SRC_FLDR=test/mutilate
+MUTILATE_PATCH?= mutilate.patch
 BIN_FLDR=bin
 
 all: $(BIN_FLDR)/memcached-debug $(BIN_FLDR)/memcached $(BIN_FLDR)/mutilate
@@ -45,14 +46,17 @@ $(MUTILATE_SRC_FLDR)/README.md:
 
 $(BIN_FLDR)/mutilate: $(MUTILATE_SRC_FLDR)/README.md  $(MUTILATE_SRC_FLDR)/*.cc $(MUTILATE_SRC_FLDR)/*.h
 	@mkdir -p bin
-	@git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/mutilate.patch --check --reverse || git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/mutilate.patch
+	git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/$(MUTILATE_PATCH) --check --reverse || git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/$(MUTILATE_PATCH)
+	sed -i "/env.Append(LIBPATH/ i\env.Append(LIBPATH= [\'$$LIBPATH\'])" test/mutilate/SConstruct
 	scons -C $(MUTILATE_SRC_FLDR)
 	cp $(MUTILATE_SRC_FLDR)/mutilate bin/
 
-clean: clean-rt-bench clean-memcached clean-mutilate
+
+clean: clean-memcached clean-mutilate
 	rm -rf bin
 
 clean-memcached:
+	rm -f bin/memcached*
 	-make -C $(MEMCACHED_SRC_FLDR) clean
 	git -C $(MEMCACHED_SRC_FLDR) restore .
 	git -C $(MEMCACHED_SRC_FLDR) clean -fxd
@@ -61,9 +65,9 @@ clean-rt-bench:
 	make -C src/rt-bench clean
 	git -C $(RTBENCH_SRC_FLDR)/dlmalloc restore .
 	git -C $(RTBENCH_SRC_FLDR) clean -fxd
-	@git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/mutilate.patch --check --reverse || git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/mutilate.patch
 
 clean-mutilate:
+	rm -f bin/mutilate
 	-scons -C $(MUTILATE_SRC_FLDR) -c clean
 	git -C $(MUTILATE_SRC_FLDR) restore .
 	git -C $(MUTILATE_SRC_FLDR) clean -fxd
