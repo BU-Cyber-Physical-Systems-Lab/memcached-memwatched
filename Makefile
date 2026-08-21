@@ -66,7 +66,7 @@ $(BIN_FLDR)/mutilate: $(MUTILATE_SRC_FLDR)/README.md  $(MUTILATE_SRC_FLDR)/*.cc 
 	cp $(MUTILATE_SRC_FLDR)/mutilate bin/
 
 
-clean: clean-memcached clean-mutilate
+clean: clean-memcached clean-mutilate clean-rt-bench
 	rm -rf bin
 
 clean-memcached:
@@ -76,7 +76,7 @@ clean-memcached:
 	git -C $(MEMCACHED_SRC_FLDR) clean -fxd
 
 clean-rt-bench:
-	make -C src/rt-bench clean
+	#make -C src/rt-bench clean
 	git -C $(RTBENCH_SRC_FLDR)/dlmalloc restore .
 	git -C $(RTBENCH_SRC_FLDR) clean -fxd
 
