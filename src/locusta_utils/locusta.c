@@ -186,7 +186,6 @@ int setup_migration(void *source, size_t size) {
   printf("HW destinations for migration:\n");
   print_destinations(hw_dsts, hw_dsts_count);
   printf("DEBUG: Setting up migration signals\n");
-  return 0;
   for (int i = 0;
        i < DUMMY_SIGNALS + (SW_MODES * SW_DSTS) + (HW_MODES * HW_DSTS); i++) {
     res = sigaction(MIGRATION_SIGNAL + i, &locusta_action, NULL);

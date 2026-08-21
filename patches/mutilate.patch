@@ -1,5 +1,5 @@
 diff --git a/SConstruct b/SConstruct
-index 57d0054..e622df1 100644
+index 57d0054..c549023 100644
 --- a/SConstruct
 +++ b/SConstruct
 @@ -16,19 +16,19 @@ if sys.platform == 'darwin':
@@ -28,3 +28,14 @@ index 57d0054..e622df1 100644
      Exit(1)
  conf.CheckLib("rt", "clock_gettime", language="C++")
  conf.CheckLibWithHeader("zmq", "zmq.hpp", "C++")
+@@ -37,8 +37,8 @@ if not conf.CheckFunc('pthread_barrier_init'):
+ 
+ env = conf.Finish()
+ 
+-env.Append(CFLAGS = ' -O3 -Wall -g')
+-env.Append(CPPFLAGS = ' -O3 -Wall -g')
++env.Append(CFLAGS = '-O3 -Wall -g')
++env.Append(CPPFLAGS = '-O3 -Wall -g')
+ 
+ env.Command(['cmdline.cc', 'cmdline.h'], 'cmdline.ggo', 'gengetopt < $SOURCE')
+ 

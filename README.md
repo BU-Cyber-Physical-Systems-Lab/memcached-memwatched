@@ -27,6 +27,33 @@ To compile everything you can simply issue `make`, this command will make sure
 all the submodules are loaded, will apply the patches and compile both
 `mutilate` `memcached` will be located in the `bin` folder.
 
+## How to get needed libs after cross-compilation
+Static compilation is not supported unfortunately, so to you need to bring the libraries used in compilation if you canno install them on the target machine.
+
+A surefire way to do this is to get the needed libraries:
+```
+executable=path/to/exec
+readelf -d ${executable} | grep NEEDED
+```
+
+The for each of these library do:
+```
+ldconfig -p | grep name_of_the_library
+```
+This will give you the path on the compilation host.
+You need to get all the needed libraries and put them in a folder, suppose `libs`.
+
+Once you have all the needed libs you need to get also the linker, which depending on the architecture might have different names, but it always starts with `ld-linux-ARCH`, for linux arm64 it could be `ld-linux-aarch64.so.1`.
+
+Then to make sure the executable loads the libraries and uses the correct liker you need to run it like this:
+```
+  ./lib/ld-linux-aarch64.so.1 \
+  --library-path "$PWD/lib" \
+  ./memcached -u root -w 4M:0x60000000:/dev/mem
+```
+
+Where `$PWD/lib` is the path where you copied all the needed libraries (liker included).
+
 ## Improving the memcached patch
 
 The easisest way to improvie the memcached patch, is to apply it with 

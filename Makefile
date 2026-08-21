@@ -61,7 +61,7 @@ $(MUTILATE_SRC_FLDR)/README.md:
 $(BIN_FLDR)/mutilate: $(MUTILATE_SRC_FLDR)/README.md  $(MUTILATE_SRC_FLDR)/*.cc $(MUTILATE_SRC_FLDR)/*.h
 	@mkdir -p bin
 	git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/$(MUTILATE_PATCH) --check --reverse || git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/$(MUTILATE_PATCH)
-	sed -i "/env.Append(LIBPATH/ i\env.Append(LIBPATH= [\'$LIBPATH\'])" test/mutilate/SConstruct
+	sed -i "/env.Append(LIBPATH/ i\env.Append(LIBPATH= [\'$(LIBPATH)\'])" test/mutilate/SConstruct
 	scons -C $(MUTILATE_SRC_FLDR)
 	cp $(MUTILATE_SRC_FLDR)/mutilate bin/
 
