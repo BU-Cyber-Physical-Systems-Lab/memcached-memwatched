@@ -1,0 +1,61 @@
+diff --git a/generator/include/memory_watcher.h b/generator/include/memory_watcher.h
+index 64c30ca..71079f4 100644
+--- a/generator/include/memory_watcher.h
++++ b/generator/include/memory_watcher.h
+@@ -19,10 +19,11 @@
+  * free to decide.
+  * @param[in] heap_file The path to file that will backup the heap. `NULL` fixed
+  * heap is unused.
++ * @returns The address of the new configured heap is a migration occurs.
+  */
+-void start_memory_watcher(size_t heap_size, void *heap_start,
+-                          const char *heap_file);
++void *start_memory_watcher(size_t heap_size, void *heap_start,
++                           const char *heap_file);
+ 
+ ///@brief Stops the memory watcher.
+ void stop_memory_watcher();
+-#endif
++#endif
+\ No newline at end of file
+diff --git a/generator/src/dlmalloc b/generator/src/dlmalloc
+--- a/generator/src/dlmalloc
++++ b/generator/src/dlmalloc
+@@ -1 +1 @@
+-Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3
++Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3-dirty
+diff --git a/generator/src/memory_watcher.c b/generator/src/memory_watcher.c
+index 1c2d310..6d8f2a6 100644
+--- a/generator/src/memory_watcher.c
++++ b/generator/src/memory_watcher.c
+@@ -165,8 +165,8 @@ static int translate_va(u64 vaddr) {
+  * bytes to setup its internal datastructures, so the maximum amount of
+  * memory that latency can use would be ~1900KB.
+  */
+-void start_memory_watcher(size_t heap_size, void *heap_start,
+-                          const char *heap_file) {
++void *start_memory_watcher(size_t heap_size, void *heap_start,
++                           const char *heap_file) {
+   int res;
+   size_t page_size = sysconf(_SC_PAGESIZE);
+   void *dummy_alloc = NULL;
+@@ -283,6 +283,11 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+                "watcher setup.");
+         exit(-1);
+       }
++      res = mlockall(MCL_CURRENT | MCL_FUTURE);
++      if (res < 0) {
++        perror("Cannot lock memory watcher preallocated memory");
++        exit(-1);
++      }
+       res = sem_post(&(memory_watcher_config.mutex));
+       if (res < 0) {
+         perror("Cannot post on memory watcher mutex during init");
+@@ -323,6 +328,7 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+       exit(-1);
+     }
+   }
++  return memory_watcher_config.mapping;
+ }
+ 
+ /**

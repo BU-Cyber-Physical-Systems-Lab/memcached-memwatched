@@ -10,13 +10,13 @@ static size_t heap_size = -1;
 /// Source address of the migration
 static void *migration_source = NULL;
 /// destinations for sync migration
-static struct migration_dst **sync_dsts = NULL;
+static struct migration_dst *sw_dsts;
 /// Number of detected sync destinations
-static size_t *sync_dsts_count = NULL;
+static size_t sw_dsts_count = 0;
 /// destinations for async migration
-static struct migration_dst **async_dsts = NULL;
+static struct migration_dst *hw_dsts;
 /// Number of detected async destinations
-static size_t *async_dsts_count = NULL;
+static size_t hw_dsts_count = 0;
 
 /** @brief handler of the migration using locusta library
  *  @param[in] sig Signal number
@@ -36,7 +36,7 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
   int selected_modes = 0;
   // selecting the migration engine implicitly restricts the number of
   // destinations available
-  struct migration_dst **selected_dsts = NULL, *selected_dst = NULL;
+  struct migration_dst *selected_dsts = NULL, selected_dst;
   size_t selected_dsts_len = 0;
   enum migration_engine engine;
   enum migration_mode mode;
@@ -66,8 +66,8 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
     signal_offset -= DUMMY_SIGNALS;
     // DUMMY_SIGNALS to sw_signals -1 -> software migration
     if (signal_offset < sw_signals) {
-      selected_dsts = sync_dsts;
-      selected_dsts_len = *sync_dsts_count;
+      selected_dsts = sw_dsts;
+      selected_dsts_len = sw_dsts_count;
       selected_modes = SW_MODES;
       engine = MIGRATION_ENGINE_SW;
       switch (signal_offset % selected_modes) {
@@ -94,8 +94,8 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
       // sw_signals to hw_signals -1 -> hardware migration
       if (signal_offset < hw_signals) {
         selected_modes = HW_MODES;
-        selected_dsts = async_dsts;
-        selected_dsts_len = *async_dsts_count;
+        selected_dsts = hw_dsts;
+        selected_dsts_len = hw_dsts_count;
         engine = MIGRATION_ENGINE_LOCUSTA;
         switch (signal_offset % selected_modes) {
         case 0:
@@ -120,12 +120,12 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
   // the signal offset
   if (signal_offset / selected_modes < selected_dsts_len) {
     selected_dst = selected_dsts[signal_offset % selected_modes];
-    dst_id = selected_dst->id;
+    dst_id = selected_dst.id;
     // adjust the migration size accordingly with the size of the destination
-    if (selected_dst->size < heap_size) {
-      migration_size = selected_dst->size;
+    if (selected_dst.size > 0 && selected_dst.size < heap_size) {
+      migration_size = selected_dst.size - 1;
     } else {
-      migration_size = heap_size;
+      migration_size = heap_size - 1;
     }
   } else {
     fprintf(stderr, "ERROR: Invalid migration destination for mode %d\n", mode);
@@ -140,11 +140,12 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
   }
 }
 
-static inline void print_destinations(struct migration_dst **dsts,
+static inline void print_destinations(struct migration_dst *dsts,
                                       size_t count) {
   int i;
+  printf("Found %lu destinations: \n", count);
   for (i = 0; i < count; i++) {
-    printf("%d: %s, size: %ld\n", i, dsts[i]->name, dsts[i]->size);
+    printf("\t %d: %s, size: %ld\n", i, dsts[i].name, dsts[i].size);
   }
 }
 
@@ -168,22 +169,24 @@ int setup_migration(void *source, size_t size) {
   struct sigaction locusta_action = {
       .sa_mask = mask, .sa_sigaction = locusta_handler, .sa_flags = SA_SIGINFO};
   // get syn migration destinations
-  res = migration_list_destinations(MIGRATION_ENGINE_SW, sync_dsts,
-                                    sync_dsts_count);
+  res = migration_list_destinations(MIGRATION_ENGINE_SW, &sw_dsts,
+                                    &sw_dsts_count);
   if (res < 0) {
-    fprintf(stderr, "ERROR: Cannot enumerate sync migration destinations!");
+    fprintf(stderr, "ERROR: Cannot enumerate software migration destinations!");
     return res;
   }
-  printf("Sync destinations for migration:\n");
-  print_destinations(sync_dsts, *sync_dsts_count);
-  res = migration_list_destinations(MIGRATION_ENGINE_LOCUSTA, async_dsts,
-                                    async_dsts_count);
+  printf("SW destinations for migration:\n");
+  print_destinations(sw_dsts, sw_dsts_count);
+  res = migration_list_destinations(MIGRATION_ENGINE_LOCUSTA, &hw_dsts,
+                                    &hw_dsts_count);
   if (res < 0) {
-    fprintf(stderr, "ERROR: Cannot enumerate sync migration destinations!");
+    fprintf(stderr, "ERROR: Cannot enumerate locusta migration destinations!");
     return res;
   }
-  printf("Async destinations for migration:\n");
-  print_destinations(async_dsts, *async_dsts_count);
+  printf("HW destinations for migration:\n");
+  print_destinations(hw_dsts, hw_dsts_count);
+  printf("DEBUG: Setting up migration signals\n");
+  return 0;
   for (int i = 0;
        i < DUMMY_SIGNALS + (SW_MODES * SW_DSTS) + (HW_MODES * HW_DSTS); i++) {
     res = sigaction(MIGRATION_SIGNAL + i, &locusta_action, NULL);
@@ -195,7 +198,8 @@ int setup_migration(void *source, size_t size) {
   }
   migration_source = source;
   heap_size = size;
-  return res;
+  printf("DEBUG: migration setup done\n");
+  return 0;
 }
 
 void destroy_migration_handler(void) {

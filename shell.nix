@@ -8,6 +8,7 @@ mkShell {
   buildInputs = [
     pkgs.stdenv
     pkgs.gcc
+    pkgs.glibc.static
     pkgs.gnumake
     pkgs.automake
     pkgs.autoconf

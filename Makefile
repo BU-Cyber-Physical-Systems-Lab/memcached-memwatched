@@ -14,6 +14,7 @@ MEMCACHED_SRC_FLDR=src/memcached
 MUTILATE_SRC_FLDR=test/mutilate
 MUTILATE_PATCH?= mutilate.patch
 BIN_FLDR=bin
+LIBPATH?=$(BASE_FLDR)/lib
 
 all: $(BIN_FLDR)/memcached-debug $(BIN_FLDR)/memcached $(BIN_FLDR)/mutilate
 setup: $(MEMCACHED_SRC_FLDR)/README.md $(RTBENCH_SRC_FLDR)/README.md $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MUTILATE_SRC_FLDR)/mutilate
@@ -35,6 +36,7 @@ $(MEMCACHED_SRC_FLDR)/Makefile: $(MEMCACHED_SRC_FLDR)/Makefile.am $(MEMCACHED_SR
 
 $(BIN_FLDR)/memcached-debug $(BIN_FLDR)/memcached: $(MEMCACHED_SRC_FLDR)/Makefile $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MEMCACHED_SRC_FLDR)/*.c $(MEMCACHED_SRC_FLDR)/*.h
 	@mkdir -p bin
+	@git -C $(RTBENCH_SRC_FLDR) apply $(PATCH_FLDR)/rt-bench.patch --check --reverse || git -C $(RTBENCH_SRC_FLDR) apply $(PATCH_FLDR)/rt-bench.patch
 	@git -C $(RTBENCH_SRC_FLDR)/dlmalloc apply --check --reverse ../dlmalloc.patch || git -C $(RTBENCH_SRC_FLDR)/dlmalloc apply ../dlmalloc.patch
 	@git -C $(MEMCACHED_SRC_FLDR) apply $(PATCH_FLDR)/memcached.patch --check --reverse || git -C $(MEMCACHED_SRC_FLDR) apply $(PATCH_FLDR)/memcached.patch
 	make -C $(MEMCACHED_SRC_FLDR)
