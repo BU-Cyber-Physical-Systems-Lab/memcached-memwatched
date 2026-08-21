@@ -1,23 +1,18 @@
 diff --git a/generator/include/memory_watcher.h b/generator/include/memory_watcher.h
-index 64c30ca..71079f4 100644
+index 64c30ca..08f19e7 100644
 --- a/generator/include/memory_watcher.h
 +++ b/generator/include/memory_watcher.h
-@@ -19,10 +19,11 @@
+@@ -19,8 +19,9 @@
   * free to decide.
   * @param[in] heap_file The path to file that will backup the heap. `NULL` fixed
   * heap is unused.
-+ * @returns The address of the new configured heap is a migration occurs.
++ * @returs the virtual address where the heap was moved, or `NULL` if the heap was not moved
   */
 -void start_memory_watcher(size_t heap_size, void *heap_start,
--                          const char *heap_file);
-+void *start_memory_watcher(size_t heap_size, void *heap_start,
-+                           const char *heap_file);
++void* start_memory_watcher(size_t heap_size, void *heap_start,
+                           const char *heap_file);
  
  ///@brief Stops the memory watcher.
- void stop_memory_watcher();
--#endif
-+#endif
-\ No newline at end of file
 diff --git a/generator/src/dlmalloc b/generator/src/dlmalloc
 --- a/generator/src/dlmalloc
 +++ b/generator/src/dlmalloc

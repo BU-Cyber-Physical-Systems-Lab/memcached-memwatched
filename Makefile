@@ -14,25 +14,37 @@ MEMCACHED_SRC_FLDR=src/memcached
 MUTILATE_SRC_FLDR=test/mutilate
 MUTILATE_PATCH?= mutilate.patch
 BIN_FLDR=bin
-LIBPATH?=$(BASE_FLDR)/lib
+LIBPATH?= $(BASE_FLDR)/lib/
+CONFIGURE_OPTS=--with-libevent=$(LIBPATH)
+
+ifdef CROSS_COMPILE 
+CC=$(CROSS_COMPILE)gcc
+AR=$(CROSS_COMPILE)AR
+LD=$(CROSS_COMPILE)LD
+STRIP=$(CROSS_COMPILE)STRIP
+CONFIGURE_OPTS+= --host=x86_64
+MUTILATE_PATCH= mutilate-aarch64.patch
+endif
+
+$(info $(CC))
 
 all: $(BIN_FLDR)/memcached-debug $(BIN_FLDR)/memcached $(BIN_FLDR)/mutilate
-setup: $(MEMCACHED_SRC_FLDR)/README.md $(RTBENCH_SRC_FLDR)/README.md $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MUTILATE_SRC_FLDR)/mutilate
+setup: $(MEMCACHED_SRC_FLDR)/README.md src/rt-bench/README.md $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MUTILATE_SRC_FLDR)/README.md
 
 $(MEMCACHED_SRC_FLDR)/README.md:
 	@git submodule update --init $(MEMCACHED_SRC_FLDR)
 
-src/rt-bench:
-	@git submodule update --init $(RTBENCH_SRC_FLDR)
+src/rt-bench/README.md:
+	@git submodule update --init src/rt-bench
 
 $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c:
-	@git submodule update --init $(RTBENCH_SRC_FLDR)/dlmalloc
+	@git -C $(RTBENCH_SRC_FLDR) submodule update --init dlmalloc
 
 $(MEMCACHED_SRC_FLDR)/configure:
 	cd $(MEMCACHED_SRC_FLDR) && ./autogen.sh
 
 $(MEMCACHED_SRC_FLDR)/Makefile: $(MEMCACHED_SRC_FLDR)/Makefile.am $(MEMCACHED_SRC_FLDR)/configure
-	cd $(MEMCACHED_SRC_FLDR) &&	./configure $(CONFIGURE_OPTS)
+	cd $(MEMCACHED_SRC_FLDR) &&  export CC="$(CC)" &&  ./configure $(CONFIGURE_OPTS)
 
 $(BIN_FLDR)/memcached-debug $(BIN_FLDR)/memcached: $(MEMCACHED_SRC_FLDR)/Makefile $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MEMCACHED_SRC_FLDR)/*.c $(MEMCACHED_SRC_FLDR)/*.h
 	@mkdir -p bin
@@ -49,7 +61,7 @@ $(MUTILATE_SRC_FLDR)/README.md:
 $(BIN_FLDR)/mutilate: $(MUTILATE_SRC_FLDR)/README.md  $(MUTILATE_SRC_FLDR)/*.cc $(MUTILATE_SRC_FLDR)/*.h
 	@mkdir -p bin
 	git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/$(MUTILATE_PATCH) --check --reverse || git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/$(MUTILATE_PATCH)
-	sed -i "/env.Append(LIBPATH/ i\env.Append(LIBPATH= [\'$$LIBPATH\'])" test/mutilate/SConstruct
+	sed -i "/env.Append(LIBPATH/ i\env.Append(LIBPATH= [\'$LIBPATH\'])" test/mutilate/SConstruct
 	scons -C $(MUTILATE_SRC_FLDR)
 	cp $(MUTILATE_SRC_FLDR)/mutilate bin/
 
