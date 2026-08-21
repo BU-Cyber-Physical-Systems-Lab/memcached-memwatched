@@ -37,13 +37,13 @@ $(MEMCACHED_SRC_FLDR)/README.md:
 src/rt-bench/README.md:
 	@git submodule update --init src/rt-bench
 
-$(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c:
+$(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c: src/rt-bench/README.md
 	@git -C $(RTBENCH_SRC_FLDR) submodule update --init dlmalloc
 
 $(MEMCACHED_SRC_FLDR)/configure:
 	cd $(MEMCACHED_SRC_FLDR) && ./autogen.sh
 
-$(MEMCACHED_SRC_FLDR)/Makefile: $(MEMCACHED_SRC_FLDR)/Makefile.am $(MEMCACHED_SRC_FLDR)/configure
+$(MEMCACHED_SRC_FLDR)/Makefile: $(MEMCACHED_SRC_FLDR)/README.md $(MEMCACHED_SRC_FLDR)/configure
 	cd $(MEMCACHED_SRC_FLDR) &&  export CC="$(CC)" &&  ./configure $(CONFIGURE_OPTS)
 
 $(BIN_FLDR)/memcached-debug $(BIN_FLDR)/memcached: $(MEMCACHED_SRC_FLDR)/Makefile $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MEMCACHED_SRC_FLDR)/*.c $(MEMCACHED_SRC_FLDR)/*.h
