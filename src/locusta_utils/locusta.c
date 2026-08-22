@@ -19,6 +19,78 @@ static struct migration_dst *hw_dsts;
 /// Number of detected async destinations
 static size_t hw_dsts_count = 0;
 
+/**@brief Select destination from migration destination address.
+ * @param[in] engine The from which destinations are searched.
+ * @param[in] address The address to match to a destination.
+ * @returns the migration destination or NULL on failure.
+ */
+static inline struct migration_dst *
+select_dst_from_addr(enum migration_engine engine, void *addr) {
+  struct migration_dst *dsts = NULL;
+  int dsts_len = 0;
+  switch (engine) {
+  case MIGRATION_ENGINE_LOCUSTA:
+    dsts = hw_dsts;
+    dsts_len = hw_dsts_count;
+    break;
+  case MIGRATION_ENGINE_SW:
+    dsts = sw_dsts;
+    dsts_len = sw_dsts_count;
+    break;
+  default:
+    fprintf(stderr, "ERROR: Engine %d has no supported destinations!\n",
+            engine);
+    return NULL;
+  }
+  for (int i = 0; i < dsts_len; i++) {
+    if (dsts[i].start == addr) {
+      return dsts + i;
+    }
+  }
+  return NULL;
+}
+
+/** @brief trigger a migration to selected destination with the selected engine
+ * and mode
+ *  @param[in] dst The selected destination.
+ *  @param[in] engine The selected engine.
+ *  @param[in] mode The selected mode.
+ *  @return 0 on success, -1 on failure.
+ */
+static inline int trigger_migration(struct migration_dst dst,
+                                    enum migration_engine engine,
+                                    enum migration_mode mode) {
+  int dst_id = -1, res;
+  size_t migration_size = 0;
+  if (migration_source == NULL) {
+    fprintf(stderr, "ERROR: Migration source is NULL!\n");
+    return -1;
+  }
+  if (heap_size_pages <= 0) {
+    fprintf(stderr, "ERROR: Invalid heap size page count!\n");
+    return -1;
+  }
+  dst_id = dst.id;
+  // adjust the migration size accordingly with the size of the destination
+  if (dst.size / getpagesize() > 0 &&
+      dst.size / getpagesize() < heap_size_pages) {
+    migration_size = (dst.size / getpagesize()) - 1;
+  } else {
+    migration_size = heap_size_pages - 1;
+  }
+  printf(
+      "DEBUG: heap size %lu destination size %lu chosen migration size %lu\n",
+      heap_size_pages, dst.size / getpagesize(), migration_size);
+  printf("DEBUG: migrating pages to destination %d with size %lu\n", dst_id,
+         migration_size);
+  res = migrate_pages_to_dst(migration_source, migration_size, engine, dst_id,
+                             mode);
+  if (res < 0) {
+    fprintf(stderr, "ERROR: Migration failed!\n");
+  }
+  return res;
+}
+
 /** @brief handler of the migration using locusta library
  *  @param[in] sig Signal number
  *  @param[in] info siginfo_t, unused.
@@ -41,15 +113,6 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
   size_t selected_dsts_len = 0;
   enum migration_engine engine;
   enum migration_mode mode;
-  size_t migration_size = 0;
-  if (migration_source == NULL) {
-    fprintf(stderr, "ERROR: Migration source is NULL!\n");
-    return;
-  }
-  if (heap_size_pages <= 0) {
-    fprintf(stderr, "ERROR: Invalid heap size page count!\n");
-    return;
-  }
   // get list of destinations for migration (according to engine type)
 
   // sw_signals + hw_signals is the last valid signal we can have for the
@@ -122,28 +185,11 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
   // the signal offset
   if (signal_offset / selected_modes < selected_dsts_len) {
     selected_dst = selected_dsts[signal_offset / selected_dsts_len];
-    dst_id = selected_dst.id;
-    // adjust the migration size accordingly with the size of the destination
-    if (selected_dst.size / getpagesize() > 0 &&
-        selected_dst.size / getpagesize() < heap_size_pages) {
-      migration_size = (selected_dst.size / getpagesize()) - 1;
-    } else {
-      migration_size = heap_size_pages - 1;
-    }
-    printf(
-        "DEBUG: heap size %lu destination size %lu chosen migration size %lu\n",
-        heap_size_pages, selected_dst.size / getpagesize(), migration_size);
   } else {
     fprintf(stderr, "ERROR: Invalid migration destination for mode %d\n", mode);
     return;
   }
-  printf("DEBUG: migrating pages to destination %d with size %lu\n", dst_id,
-         migration_size);
-  res = migrate_pages_to_dst(migration_source, migration_size, engine, dst_id,
-                             mode);
-  if (res < 0) {
-    fprintf(stderr, "ERROR: Migration failed!\n");
-  }
+  trigger_migration(selected_dst, engine, mode);
 }
 
 static inline void print_destinations(struct migration_dst *dsts,
@@ -155,7 +201,7 @@ static inline void print_destinations(struct migration_dst *dsts,
   }
 }
 
-int setup_migration(void *source, size_t size) {
+int setup_migration(void *source, void *offset, size_t size) {
   int res = -1;
   sigset_t mask;
   if (source == NULL) {
@@ -204,6 +250,13 @@ int setup_migration(void *source, size_t size) {
   migration_source = source;
   heap_size_pages = size;
   printf("DEBUG: migration setup done\n");
+  if (offset > 0) {
+    printf("DEBUG: triggering premigration to %p\n", offset);
+    struct migration_dst *premigration_dst =
+        select_dst_from_addr(MIGRATION_ENGINE_SW, offset);
+    trigger_migration(*premigration_dst, MIGRATION_ENGINE_SW,
+                      MIGRATION_MODE_SYNC);
+  }
   return 0;
 }
 

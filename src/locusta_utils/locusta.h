@@ -15,12 +15,16 @@
 /// Max number of hardware modes
 #define HW_MODES 2
 
-/** @brief installs a signal handler to trigger a migration via locusta
+/** @brief installs a signal handler to trigger a heap migration.
  *  @param[in] source The source address for memory to migrate.
+ *  @param[in] offset The migration offset;
  *  @param[in] size The size (in pages) of the memory area to migrate.
  *  @returns 0 on success, <0 on failure.
+ *  @details
+ *  If offset is not NULL, then a premigration to the selected memory location
+ * is triggered.
  */
-int setup_migration(void *source, size_t size);
+int setup_migration(void *source, void *offset, size_t size);
 
 /// Disables the migration handler
 void destroy_migration_handler(void);
