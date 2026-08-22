@@ -15,15 +15,10 @@ pkgs-cross.mkShell {
   ];
   buildInputs = with pkgs-cross; [
     stdenv
-    glibc
-    glibc.static
-    gcc
-    (libevent.override { static = true; })
+    libevent
     binutils
     openssl
     zeromq
   ];
   CONFIGURE_OPTS = "--host=x86_64";
-  MUTILATE_PATCH = "mutilate-aarch64.patch";
-  LIBPATH = "${(pkgs-cross.libevent.override { static = true; })}/lib";
 }

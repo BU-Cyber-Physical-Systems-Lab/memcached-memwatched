@@ -14,8 +14,6 @@ MEMCACHED_SRC_FLDR=src/memcached
 MUTILATE_SRC_FLDR=test/mutilate
 MUTILATE_PATCH?= mutilate.patch
 BIN_FLDR=bin
-LIBPATH?= $(BASE_FLDR)/lib/
-CONFIGURE_OPTS=--with-libevent=$(LIBPATH)
 
 ifdef CROSS_COMPILE 
 CC=$(CROSS_COMPILE)gcc
@@ -23,10 +21,7 @@ AR=$(CROSS_COMPILE)AR
 LD=$(CROSS_COMPILE)LD
 STRIP=$(CROSS_COMPILE)STRIP
 CONFIGURE_OPTS+= --host=x86_64
-MUTILATE_PATCH= mutilate-aarch64.patch
 endif
-
-$(info $(CC))
 
 all: $(BIN_FLDR)/memcached-debug $(BIN_FLDR)/memcached $(BIN_FLDR)/mutilate
 setup: $(MEMCACHED_SRC_FLDR)/README.md src/rt-bench/README.md $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MUTILATE_SRC_FLDR)/README.md

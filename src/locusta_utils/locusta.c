@@ -4,9 +4,10 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 /// Size of the migration in pages
-static size_t heap_size = -1;
+static size_t heap_size_pages = -1;
 /// Source address of the migration
 static void *migration_source = NULL;
 /// destinations for sync migration
@@ -41,11 +42,11 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
   enum migration_engine engine;
   enum migration_mode mode;
   size_t migration_size = 0;
-  if (migration_source != NULL) {
+  if (migration_source == NULL) {
     fprintf(stderr, "ERROR: Migration source is NULL!\n");
     return;
   }
-  if (heap_size <= 0) {
+  if (heap_size_pages <= 0) {
     fprintf(stderr, "ERROR: Invalid heap size page count!\n");
     return;
   }
@@ -54,7 +55,8 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
   // sw_signals + hw_signals is the last valid signal we can have for the
   // migration
   if (signal_offset > hw_signals + sw_signals) {
-    fprintf(stderr, "ERROR: migration signal %lu out of range\n", heap_size);
+    fprintf(stderr, "ERROR: migration signal %lu out of range\n",
+            heap_size_pages);
     return;
   }
   printf("DEBUG: signal offset is %d\n", signal_offset);
@@ -119,14 +121,18 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
   // now select the destination according to which engine and mode is encoded in
   // the signal offset
   if (signal_offset / selected_modes < selected_dsts_len) {
-    selected_dst = selected_dsts[signal_offset % selected_modes];
+    selected_dst = selected_dsts[signal_offset / selected_dsts_len];
     dst_id = selected_dst.id;
     // adjust the migration size accordingly with the size of the destination
-    if (selected_dst.size > 0 && selected_dst.size < heap_size) {
-      migration_size = selected_dst.size - 1;
+    if (selected_dst.size / getpagesize() > 0 &&
+        selected_dst.size / getpagesize() < heap_size_pages) {
+      migration_size = (selected_dst.size / getpagesize()) - 1;
     } else {
-      migration_size = heap_size - 1;
+      migration_size = heap_size_pages - 1;
     }
+    printf(
+        "DEBUG: heap size %lu destination size %lu chosen migration size %lu\n",
+        heap_size_pages, selected_dst.size / getpagesize(), migration_size);
   } else {
     fprintf(stderr, "ERROR: Invalid migration destination for mode %d\n", mode);
     return;
@@ -196,7 +202,7 @@ int setup_migration(void *source, size_t size) {
     }
   }
   migration_source = source;
-  heap_size = size;
+  heap_size_pages = size;
   printf("DEBUG: migration setup done\n");
   return 0;
 }

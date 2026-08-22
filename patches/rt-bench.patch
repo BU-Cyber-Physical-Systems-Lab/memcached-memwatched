@@ -1,18 +1,23 @@
 diff --git a/generator/include/memory_watcher.h b/generator/include/memory_watcher.h
-index 64c30ca..08f19e7 100644
+index 64c30ca..71079f4 100644
 --- a/generator/include/memory_watcher.h
 +++ b/generator/include/memory_watcher.h
-@@ -19,8 +19,9 @@
+@@ -19,10 +19,11 @@
   * free to decide.
   * @param[in] heap_file The path to file that will backup the heap. `NULL` fixed
   * heap is unused.
-+ * @returs the virtual address where the heap was moved, or `NULL` if the heap was not moved
++ * @returns The address of the new configured heap is a migration occurs.
   */
 -void start_memory_watcher(size_t heap_size, void *heap_start,
-+void* start_memory_watcher(size_t heap_size, void *heap_start,
-                           const char *heap_file);
+-                          const char *heap_file);
++void *start_memory_watcher(size_t heap_size, void *heap_start,
++                           const char *heap_file);
  
  ///@brief Stops the memory watcher.
+ void stop_memory_watcher();
+-#endif
++#endif
+\ No newline at end of file
 diff --git a/generator/src/dlmalloc b/generator/src/dlmalloc
 --- a/generator/src/dlmalloc
 +++ b/generator/src/dlmalloc
@@ -20,7 +25,7 @@ diff --git a/generator/src/dlmalloc b/generator/src/dlmalloc
 -Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3
 +Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3-dirty
 diff --git a/generator/src/memory_watcher.c b/generator/src/memory_watcher.c
-index 1c2d310..6d8f2a6 100644
+index 1c2d310..78592a4 100644
 --- a/generator/src/memory_watcher.c
 +++ b/generator/src/memory_watcher.c
 @@ -165,8 +165,8 @@ static int translate_va(u64 vaddr) {
@@ -34,10 +39,89 @@ index 1c2d310..6d8f2a6 100644
    int res;
    size_t page_size = sysconf(_SC_PAGESIZE);
    void *dummy_alloc = NULL;
-@@ -283,6 +283,11 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+@@ -194,12 +194,6 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+     if (__atomic_compare_exchange(&(memory_watcher_config.status),
+                                   &expected_state, &initializing_state, false,
+                                   __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+-      // disable mmap usage
+-      res = mallopt(M_MMAP_MAX, 0);
+-      if (res == 0) {
+-        elogf(LOG_LEVEL_ERR, "Cannot disable mmap based allocation.\n");
+-        exit(-1);
+-      }
+       // initialize mutex to 0, so other threads will need to wait for
+       // initialization to be completed
+       res = sem_init(&(memory_watcher_config.mutex), 0, 0);
+@@ -213,20 +207,14 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+         elogf(LOG_LEVEL_TRACE,
+               "Starting  memory watcher, bytes to preallocate: %zu.\n",
+               heap_size);
+-        // preallocate the requested memory
+-        res = mallopt(M_TOP_PAD, heap_size);
+-        if (res == 0) {
+-          elogf(LOG_LEVEL_ERR, "Cannot preallocate %zu bytes.\n", heap_size);
+-          exit(-1);
+-        }
+-        // a dummy allocation to have malloc preallocate the requested amount of
+-        // memory.
+-        dummy_alloc = malloc(heap_size);
+-        if (dummy_alloc == NULL) {
+-          elogf(LOG_LEVEL_ERR, "Cannot allocate dynamic memory, aborting.\n");
++        // create an anonymous mapping for the heap
++        memory_watcher_config.mapping = (mem_watcher_address_t *)mmap(
++            NULL, heap_size, PROT_READ | PROT_WRITE,
++            MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
++        if (memory_watcher_config.mapping == MAP_FAILED) {
++          perror("Cannot mmap  heap to private location, aborting.\n");
+           exit(-1);
+         }
+-        free(dummy_alloc);
+       } else {
+         // open the file that will back the heap
+         memory_watcher_config.heap_fd = open(heap_file, O_RDWR);
+@@ -238,7 +226,7 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+         // map a region of `/dev/dem`, starting from `heap_start` and of size
+         // `heap_size`
+ 
+-        // @todo `heap_size` is a void*, is it ok to directly cast to `off_t`?
++        // @TODO `heap_size` is a void*, is it ok to directly cast to `off_t`?
+         // Considering we are addressing `/dev/mem` which has a view of all the
+         // physical memory this is conceptually sound. This could create
+         // problems with fixed heap sizes and memory that is not 1 byte
+@@ -253,20 +241,19 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+         if (memory_watcher_config.mapping == MAP_FAILED) {
+           perror("Cannot mmap heap file to fix heap location, aborting.\n");
+           close(memory_watcher_config.heap_fd);
+-          close(memory_watcher_config.pagemap_fd);
+           exit(-1);
+         }
+         // add the 12 bits that we masked to make the mapping page-aligned.
+         memory_watcher_config.mapping += ((off_t)heap_start & (page_size - 1));
+-        memory_watcher_config.heap_start = (mem_watcher_address_t *)heap_start;
+-        memory_watcher_config.fixed_heap_program_break =
+-            memory_watcher_config.mapping;
+         if (strncmp(heap_file, "/dev/mem", 8) == 0) {
+           elogf(LOG_LEVEL_TRACE, "Fixed heap enabled.\n");
+         } else {
+           elogf(LOG_LEVEL_TRACE, "File backed heap enabled.\n");
+         }
+       }
++      memory_watcher_config.heap_start = (mem_watcher_address_t *)heap_start;
++      memory_watcher_config.fixed_heap_program_break =
++          memory_watcher_config.mapping;
+       memory_watcher_config.heap_size = heap_size;
+       memory_watcher_config.initial_program_break =
+           (mem_watcher_address_t *)sbrk(0);
+@@ -283,6 +270,17 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
                 "watcher setup.");
          exit(-1);
        }
++      // disable mmap usage
++      res = mallopt(M_MMAP_MAX, 0);
++      if (res == 0) {
++        elogf(LOG_LEVEL_ERR, "Cannot disable mmap based allocation.\n");
++        exit(-1);
++      }
 +      res = mlockall(MCL_CURRENT | MCL_FUTURE);
 +      if (res < 0) {
 +        perror("Cannot lock memory watcher preallocated memory");
@@ -46,7 +130,7 @@ index 1c2d310..6d8f2a6 100644
        res = sem_post(&(memory_watcher_config.mutex));
        if (res < 0) {
          perror("Cannot post on memory watcher mutex during init");
-@@ -323,6 +328,7 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+@@ -323,6 +321,7 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
        exit(-1);
      }
    }
@@ -54,3 +138,32 @@ index 1c2d310..6d8f2a6 100644
  }
  
  /**
+@@ -528,6 +527,7 @@ void *rtbench_sbrk(intptr_t offset) {
+   __atomic_load(&(memory_watcher_config.status), &current_status,
+                 __ATOMIC_SEQ_CST);
+   switch (current_status) {
++  case MEMORY_WATCHER_ENABLED:
+   case MEMORY_WATCHER_FILE_HEAP:
+   case MEMORY_WATCHER_FIXED_HEAP:
+     // with a positive increment we need to check if the new program break is
+@@ -566,20 +566,6 @@ void *rtbench_sbrk(intptr_t offset) {
+           "memory watcher initialization, allowed.");
+     pointer = sbrk(offset);
+     break;
+-  case MEMORY_WATCHER_ENABLED:
+-    if (offset <= 0) {
+-      if (offset < 0) {
+-        elogf(LOG_LEVEL_DEBUG,
+-              "Usage of rtbench_sbrk() to reduce program break ignored.");
+-      }
+-      pointer = memory_watcher_config.initial_program_break;
+-    } else {
+-      elogf(LOG_LEVEL_ERR, "Use of rtbench_sbrk() to increase program break "
+-                           "would violate memory limit setting. Aborting.\n");
+-      errno = ENOMEM;
+-      pointer = (void *)-1;
+-    }
+-    break;
+   default:
+     elogf(LOG_LEVEL_ERR, "Invalid memory watcher status: %d.\n",
+           memory_watcher_config.status);
