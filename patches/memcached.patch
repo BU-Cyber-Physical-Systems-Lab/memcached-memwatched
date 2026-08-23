@@ -40,7 +40,7 @@ index a7a11ad..79bbcaa 100644
  memcached_debug_DEPENDENCIES =
  CLEANFILES=
 diff --git a/memcached.c b/memcached.c
-index 8611661..2ceac1f 100644
+index 8611661..17af673 100644
 --- a/memcached.c
 +++ b/memcached.c
 @@ -61,6 +61,9 @@
@@ -58,7 +58,7 @@ index 8611661..2ceac1f 100644
  
  static void settings_init(void) {
 +    settings.heap_size=0;
-+    settings.heap_start=NULL;
++    settings.heap_start=0;
 +    settings.heap_location=NULL;
      settings.use_cas = true;
      settings.access = 0700;
@@ -87,7 +87,7 @@ index 8611661..2ceac1f 100644
          {"auth-file", required_argument, 0, 'Y'},
          {"memory-file", required_argument, 0, 'e'},
          {"extended", required_argument, 0, 'o'},
-@@ -4999,6 +5008,61 @@ int main (int argc, char **argv) {
+@@ -4999,6 +5008,60 @@ int main (int argc, char **argv) {
              }
          }
          switch (c) {
@@ -99,25 +99,24 @@ index 8611661..2ceac1f 100644
 +              start++; // start is after the :
 +              location=strstr(start,":"); // now try to find the location part
 +            if (location != NULL) {
-+              location[0]='\0'; // replace : with /0
++              location[0]='\0'; // replace : with \0
 +              location++; // location string starts after ':'
-+            }
 +            }
 +          }
 +          settings.heap_location = location;
-+          printf("DEBUG: heap location: %s\n",location);
++          printf("DEBUG: heap location: %s\n",settings.heap_location);
 +          char heap_size_magnitude='\0';
 +          size_t heap_size=0;
-+          void* heap_start=NULL;
++          size_t heap_start=0;
 +          if(start!=NULL){
-+            res = sscanf(start, "%p", &heap_start);
++            res = sscanf(start, "0x%lx", &heap_start);
 +            if (res < 1 || res == EOF) {
 +              perror("Error during heap_start argument parsing");
 +              exit(EX_USAGE);
 +            }
 +          }
 +          settings.heap_start = heap_start;
-+          printf("DEBUG: heap start: %p\n",heap_start);
++          printf("DEBUG: heap start: 0x%lx\n",heap_start);
 +          res = sscanf(size, "%zu%1c", &heap_size, &heap_size_magnitude);
 +          if (res < 1 || res == EOF) {
 +            perror(
@@ -149,7 +148,7 @@ index 8611661..2ceac1f 100644
          case 'A':
              /* enables "shutdown" command */
              settings.shutdown_command = true;
-@@ -5659,23 +5723,49 @@ int main (int argc, char **argv) {
+@@ -5659,23 +5722,49 @@ int main (int argc, char **argv) {
              return 1;
          }
      }
@@ -157,10 +156,10 @@ index 8611661..2ceac1f 100644
 +
 +    if(settings.heap_size != 0){
 +      printf("Starting memory watcher\n");
-+      void* heap_mapping=start_memory_watcher(settings.heap_size,settings.heap_start,settings.heap_location);
-+      printf("Memory wathcer ready at %p\n",heap_mapping);
++      void* heap_mapping=start_memory_watcher(settings.heap_size,NULL,settings.heap_location);
++      printf("Memory watcher ready at %p\n",heap_mapping);
 +      printf("setting up migration handler\n");
-+      setup_migration(heap_mapping, heap_start, settings.heap_size/getpagesize());
++      setup_migration(heap_mapping,settings.heap_start, settings.heap_size/getpagesize());
 +    }
 +    printf("Memory watcher and migration handlers are ready\n");
  
@@ -199,7 +198,7 @@ index 8611661..2ceac1f 100644
          exit(EX_USAGE);
      }
      if (settings.item_size_max > 1024 * 1024) {
-@@ -5688,18 +5778,30 @@ int main (int argc, char **argv) {
+@@ -5688,18 +5777,30 @@ int main (int argc, char **argv) {
      if (settings.slab_chunk_size_max > settings.item_size_max) {
          fprintf(stderr, "slab_chunk_max (bytes: %d) cannot be larger than -I (item_size_max %d)\n",
                  settings.slab_chunk_size_max, settings.item_size_max);
@@ -230,7 +229,7 @@ index 8611661..2ceac1f 100644
          exit(EX_USAGE);
      }
  #ifdef EXTSTORE
-@@ -5728,6 +5830,10 @@ int main (int argc, char **argv) {
+@@ -5728,6 +5829,10 @@ int main (int argc, char **argv) {
              }
              meta->slab_config = temp;
          } else {
@@ -241,7 +240,7 @@ index 8611661..2ceac1f 100644
              exit(EX_USAGE);
          }
      } else if (!meta->slab_config) {
-@@ -5737,16 +5843,28 @@ int main (int argc, char **argv) {
+@@ -5737,16 +5842,28 @@ int main (int argc, char **argv) {
  
      if (settings.hot_lru_pct + settings.warm_lru_pct > 80) {
          fprintf(stderr, "hot_lru_pct + warm_lru_pct cannot be more than 80%% combined\n");
@@ -270,7 +269,7 @@ index 8611661..2ceac1f 100644
          exit(EX_USAGE);
      }
  
-@@ -5766,12 +5884,20 @@ int main (int argc, char **argv) {
+@@ -5766,12 +5883,20 @@ int main (int argc, char **argv) {
          } else {
              if (settings.binding_protocol != binary_prot) {
                  fprintf(stderr, "ERROR: You cannot allow the ASCII protocol while using SASL.\n");
@@ -291,7 +290,7 @@ index 8611661..2ceac1f 100644
              exit(EX_USAGE);
          }
      }
-@@ -5782,6 +5908,10 @@ int main (int argc, char **argv) {
+@@ -5782,6 +5907,10 @@ int main (int argc, char **argv) {
          } else {
              if (settings.binding_protocol != ascii_prot) {
                  fprintf(stderr, "ERROR: You cannot allow the BINARY protocol while using ascii authentication tokens.\n");
@@ -302,7 +301,7 @@ index 8611661..2ceac1f 100644
                  exit(EX_USAGE);
              }
          }
-@@ -5793,6 +5923,10 @@ int main (int argc, char **argv) {
+@@ -5793,6 +5922,10 @@ int main (int argc, char **argv) {
  
      if (settings.port > 65535) {
          fprintf(stderr, "ERROR: Invalid port number %d.\n", settings.port);
@@ -313,7 +312,7 @@ index 8611661..2ceac1f 100644
          exit(EX_USAGE);
      }
  
-@@ -5803,6 +5937,10 @@ int main (int argc, char **argv) {
+@@ -5803,6 +5936,10 @@ int main (int argc, char **argv) {
      if (settings.ssl_enabled) {
          if (!settings.port) {
              fprintf(stderr, "ERROR: You cannot enable SSL without a TCP port.\n");
@@ -324,7 +323,7 @@ index 8611661..2ceac1f 100644
              exit(EX_USAGE);
          }
          // Initiate the SSL context.
-@@ -5831,6 +5969,10 @@ int main (int argc, char **argv) {
+@@ -5831,6 +5968,10 @@ int main (int argc, char **argv) {
  
          if ((getrlimit(RLIMIT_CORE, &rlim) != 0) || rlim.rlim_cur == 0) {
              fprintf(stderr, "failed to ensure corefile creation\n");
@@ -335,7 +334,7 @@ index 8611661..2ceac1f 100644
              exit(EX_OSERR);
          }
      }
-@@ -5842,6 +5984,10 @@ int main (int argc, char **argv) {
+@@ -5842,6 +5983,10 @@ int main (int argc, char **argv) {
  
      if (getrlimit(RLIMIT_NOFILE, &rlim) != 0) {
          fprintf(stderr, "failed to getrlimit number of files\n");
@@ -346,7 +345,7 @@ index 8611661..2ceac1f 100644
          exit(EX_OSERR);
      } else {
          rlim.rlim_cur = settings.maxconns;
-@@ -5849,6 +5995,10 @@ int main (int argc, char **argv) {
+@@ -5849,6 +5994,10 @@ int main (int argc, char **argv) {
          if (setrlimit(RLIMIT_NOFILE, &rlim) != 0) {
  #ifndef MEMCACHED_DEBUG
              fprintf(stderr, "failed to set rlimit for open files. Try starting as root or requesting smaller maxconns value.\n");
@@ -357,7 +356,7 @@ index 8611661..2ceac1f 100644
              exit(EX_OSERR);
  #endif
          }
-@@ -5858,10 +6008,18 @@ int main (int argc, char **argv) {
+@@ -5858,10 +6007,18 @@ int main (int argc, char **argv) {
      if (getuid() == 0 || geteuid() == 0) {
          if (username == 0 || *username == '\0') {
              fprintf(stderr, "must add '-u root' to start as root\n");
@@ -376,7 +375,7 @@ index 8611661..2ceac1f 100644
              exit(EX_NOUSER);
          }
          if (setgroups(0, NULL) < 0) {
-@@ -5875,11 +6033,19 @@ int main (int argc, char **argv) {
+@@ -5875,11 +6032,19 @@ int main (int argc, char **argv) {
              fprintf(stderr, "failed to drop supplementary groups: %s\n",
                      strerror(errno));
              if (should_exit) {
@@ -396,7 +395,7 @@ index 8611661..2ceac1f 100644
              exit(EX_OSERR);
          }
      }
-@@ -5894,6 +6060,10 @@ int main (int argc, char **argv) {
+@@ -5894,6 +6059,10 @@ int main (int argc, char **argv) {
      if (do_daemonize) {
          if (daemonize(maxcore, settings.verbose) == -1) {
              fprintf(stderr, "failed to daemon() in order to daemonize\n");
@@ -407,7 +406,7 @@ index 8611661..2ceac1f 100644
              exit(EXIT_FAILURE);
          }
      }
-@@ -5928,6 +6098,10 @@ int main (int argc, char **argv) {
+@@ -5928,6 +6097,10 @@ int main (int argc, char **argv) {
      if (settings.auth_file) {
          if (settings.udpport) {
              fprintf(stderr, "Cannot use UDP with ascii authentication enabled (-U 0 to disable)\n");
@@ -418,7 +417,7 @@ index 8611661..2ceac1f 100644
              exit(EX_USAGE);
          }
  
-@@ -5935,19 +6109,35 @@ int main (int argc, char **argv) {
+@@ -5935,19 +6108,35 @@ int main (int argc, char **argv) {
              case AUTHFILE_STATFAIL:
                  vperror("Could not stat authfile [%s], error %s", settings.auth_file
                                                              , strerror(errno));
@@ -454,7 +453,7 @@ index 8611661..2ceac1f 100644
                  exit(EXIT_FAILURE);
                  break;
              case AUTHFILE_OK:
-@@ -6029,6 +6219,10 @@ int main (int argc, char **argv) {
+@@ -6029,6 +6218,10 @@ int main (int argc, char **argv) {
       */
      if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
          perror("failed to ignore SIGPIPE; sigaction");
@@ -465,7 +464,7 @@ index 8611661..2ceac1f 100644
          exit(EX_OSERR);
      }
      /* start up worker threads if MT mode */
-@@ -6048,25 +6242,45 @@ int main (int argc, char **argv) {
+@@ -6048,25 +6241,45 @@ int main (int argc, char **argv) {
  #ifdef PROXY
      if (settings.proxy_enabled) {
          if (proxy_first_confload(settings.proxy_ctx) != 0) {
@@ -511,7 +510,7 @@ index 8611661..2ceac1f 100644
          exit(EXIT_FAILURE);
      }
  
-@@ -6082,11 +6296,19 @@ int main (int argc, char **argv) {
+@@ -6082,11 +6295,19 @@ int main (int argc, char **argv) {
      if (settings.slab_reassign) {
          settings.slab_rebal = start_slab_maintenance_thread(storage);
          if (!settings.slab_rebal) {
@@ -531,7 +530,7 @@ index 8611661..2ceac1f 100644
          exit(EXIT_FAILURE);
      }
  
-@@ -6117,6 +6339,10 @@ int main (int argc, char **argv) {
+@@ -6117,6 +6338,10 @@ int main (int argc, char **argv) {
          errno = 0;
          if (server_socket_unix(settings.socketpath,settings.access)) {
              vperror("failed to listen on UNIX socket: %s", settings.socketpath);
@@ -542,7 +541,7 @@ index 8611661..2ceac1f 100644
              exit(EX_OSERR);
          }
      }
-@@ -6133,6 +6359,10 @@ int main (int argc, char **argv) {
+@@ -6133,6 +6358,10 @@ int main (int argc, char **argv) {
              temp_portnumber_filename = malloc(len);
              if (temp_portnumber_filename == NULL) {
                  vperror("Failed to allocate memory for portnumber file");
@@ -553,7 +552,7 @@ index 8611661..2ceac1f 100644
                  exit(EX_OSERR);
              }
              snprintf(temp_portnumber_filename,
-@@ -6155,6 +6385,10 @@ int main (int argc, char **argv) {
+@@ -6155,6 +6384,10 @@ int main (int argc, char **argv) {
                  vperror("failed to listen on one of interface(s) %s", settings.inter);
              }
              free(temp_portnumber_filename);
@@ -564,7 +563,7 @@ index 8611661..2ceac1f 100644
              exit(EX_OSERR);
          }
  
-@@ -6175,6 +6409,10 @@ int main (int argc, char **argv) {
+@@ -6175,6 +6408,10 @@ int main (int argc, char **argv) {
                  vperror("failed to listen on one of interface(s) %s", settings.inter);
              }
              free(temp_portnumber_filename);
@@ -575,7 +574,7 @@ index 8611661..2ceac1f 100644
              exit(EX_OSERR);
          }
  
-@@ -6192,6 +6430,10 @@ int main (int argc, char **argv) {
+@@ -6192,6 +6429,10 @@ int main (int argc, char **argv) {
      usleep(1000);
      if (stats_state.curr_conns + stats_state.reserved_fds >= settings.maxconns - 1) {
          fprintf(stderr, "Maxconns setting is too low, use -c to increase.\n");
@@ -586,7 +585,7 @@ index 8611661..2ceac1f 100644
          exit(EXIT_FAILURE);
      }
  
-@@ -6247,6 +6489,10 @@ int main (int argc, char **argv) {
+@@ -6247,6 +6488,10 @@ int main (int argc, char **argv) {
      if (settings.inter)
        free(settings.inter);
  
@@ -598,7 +597,7 @@ index 8611661..2ceac1f 100644
      event_base_free(main_base);
  
 diff --git a/memcached.h b/memcached.h
-index 1dc817b..5593be7 100644
+index 1dc817b..8fdcaf4 100644
 --- a/memcached.h
 +++ b/memcached.h
 @@ -468,6 +468,9 @@ struct stats_state {
@@ -606,7 +605,7 @@ index 1dc817b..5593be7 100644
   */
  struct settings {
 +    size_t heap_size;
-+    void* heap_start;
++    size_t heap_start;
 +    char* heap_location;
      size_t maxbytes;
      int maxconns;

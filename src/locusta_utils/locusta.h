@@ -24,7 +24,7 @@
  *  If offset is not NULL, then a premigration to the selected memory location
  * is triggered.
  */
-int setup_migration(void *source, void *offset, size_t size);
+int setup_migration(void *source, size_t offset, size_t size);
 
 /// Disables the migration handler
 void destroy_migration_handler(void);

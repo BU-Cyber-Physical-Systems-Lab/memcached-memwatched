@@ -13,6 +13,7 @@ struct migration_dst {
     enum migration_engine engine;
     int id;
     size_t size;
+    size_t start;
 };
 
 enum migration_mode {

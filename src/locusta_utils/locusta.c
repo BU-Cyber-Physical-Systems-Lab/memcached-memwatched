@@ -25,7 +25,7 @@ static size_t hw_dsts_count = 0;
  * @returns the migration destination or NULL on failure.
  */
 static inline struct migration_dst *
-select_dst_from_addr(enum migration_engine engine, void *addr) {
+select_dst_from_addr(enum migration_engine engine, size_t addr) {
   struct migration_dst *dsts = NULL;
   int dsts_len = 0;
   switch (engine) {
@@ -97,14 +97,11 @@ static inline int trigger_migration(struct migration_dst dst,
  *  @param[in] ucontext userland context before signal, unused.
  */
 static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
-  int res;
   // our migration ID is the displacement from the base migration signal
   int signal_offset = sig - MIGRATION_SIGNAL;
   // we calculate the number of signals for software and hardware migration
   int sw_signals = SW_MODES * SW_DSTS;
   int hw_signals = HW_MODES * HW_DSTS;
-  // the ID of the migration destination from struct migration_dst
-  int dst_id = -1;
   // number of modes compatible for the selected destinations
   int selected_modes = 0;
   // selecting the migration engine implicitly restricts the number of
@@ -197,11 +194,11 @@ static inline void print_destinations(struct migration_dst *dsts,
   int i;
   printf("Found %lu destinations: \n", count);
   for (i = 0; i < count; i++) {
-    printf("\t %d: %s, size: %ld\n", i, dsts[i].name, dsts[i].size);
+    printf("\t %d: %s, size: %ld start: 0x%lx\n", i, dsts[i].name, dsts[i].size,dsts[i].start);
   }
 }
 
-int setup_migration(void *source, void *offset, size_t size) {
+int setup_migration(void *source, size_t offset, size_t size) {
   int res = -1;
   sigset_t mask;
   if (source == NULL) {
@@ -251,7 +248,7 @@ int setup_migration(void *source, void *offset, size_t size) {
   heap_size_pages = size;
   printf("DEBUG: migration setup done\n");
   if (offset > 0) {
-    printf("DEBUG: triggering premigration to %p\n", offset);
+    printf("DEBUG: triggering premigration to 0x%lx\n", offset);
     struct migration_dst *premigration_dst =
         select_dst_from_addr(MIGRATION_ENGINE_SW, offset);
     trigger_migration(*premigration_dst, MIGRATION_ENGINE_SW,

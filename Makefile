@@ -13,7 +13,6 @@ RTBENCH_SRC_FLDR=src/rt-bench/generator/src
 MEMCACHED_SRC_FLDR=src/memcached
 MUTILATE_SRC_FLDR=test/mutilate
 MUTILATE_PATCH?= mutilate.patch
-BIN_FLDR=bin
 
 ifdef CROSS_COMPILE 
 CC=$(CROSS_COMPILE)gcc
@@ -42,30 +41,23 @@ $(MEMCACHED_SRC_FLDR)/Makefile: $(MEMCACHED_SRC_FLDR)/README.md $(MEMCACHED_SRC_
 	cd $(MEMCACHED_SRC_FLDR) &&  export CC="$(CC)" &&  ./configure $(CONFIGURE_OPTS)
 
 $(BIN_FLDR)/memcached-debug $(BIN_FLDR)/memcached: $(MEMCACHED_SRC_FLDR)/Makefile $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MEMCACHED_SRC_FLDR)/*.c $(MEMCACHED_SRC_FLDR)/*.h
-	@mkdir -p bin
 	@git -C $(RTBENCH_SRC_FLDR) apply $(PATCH_FLDR)/rt-bench.patch --check --reverse || git -C $(RTBENCH_SRC_FLDR) apply $(PATCH_FLDR)/rt-bench.patch
 	@git -C $(RTBENCH_SRC_FLDR)/dlmalloc apply --check --reverse ../dlmalloc.patch || git -C $(RTBENCH_SRC_FLDR)/dlmalloc apply ../dlmalloc.patch
 	@git -C $(MEMCACHED_SRC_FLDR) apply $(PATCH_FLDR)/memcached.patch --check --reverse || git -C $(MEMCACHED_SRC_FLDR) apply $(PATCH_FLDR)/memcached.patch
 	make -C $(MEMCACHED_SRC_FLDR)
-	cp $(MEMCACHED_SRC_FLDR)/memcached bin/
-	cp $(MEMCACHED_SRC_FLDR)/memcached-debug bin/
 
 $(MUTILATE_SRC_FLDR)/README.md:
 	@git submodule update --init $(MUTILATE_SRC_FLDR)
 
 $(BIN_FLDR)/mutilate: $(MUTILATE_SRC_FLDR)/README.md  $(MUTILATE_SRC_FLDR)/*.cc $(MUTILATE_SRC_FLDR)/*.h
-	@mkdir -p bin
 	git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/$(MUTILATE_PATCH) --check --reverse || git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/$(MUTILATE_PATCH)
 	sed -i "/env.Append(LIBPATH/ i\env.Append(LIBPATH= [\'$(LIBPATH)\'])" test/mutilate/SConstruct
 	scons -C $(MUTILATE_SRC_FLDR)
-	cp $(MUTILATE_SRC_FLDR)/mutilate bin/
 
 
 clean: clean-memcached clean-mutilate clean-rt-bench
-	rm -rf bin
 
 clean-memcached:
-	rm -f bin/memcached*
 	-make -C $(MEMCACHED_SRC_FLDR) clean
 	git -C $(MEMCACHED_SRC_FLDR) restore .
 	git -C $(MEMCACHED_SRC_FLDR) clean -fxd
@@ -77,7 +69,6 @@ clean-rt-bench:
 	git -C $(RTBENCH_SRC_FLDR) clean -fxd
 
 clean-mutilate:
-	rm -f bin/mutilate
 	-scons -C $(MUTILATE_SRC_FLDR) -c clean
 	git -C $(MUTILATE_SRC_FLDR) restore .
 	git -C $(MUTILATE_SRC_FLDR) clean -fxd
