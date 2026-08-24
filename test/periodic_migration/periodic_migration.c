@@ -10,7 +10,7 @@
 
 timer_t period_timer;
 static long period_sec = 0, period_nsec = 0;
-static int signal_to_send = 0;
+static int num_signals_to_send = 0,*signals_to_send=NULL, period_id=0;
 pid_t target = 0;
 static inline double get_time(void) {
   struct timeval tv;
@@ -19,13 +19,13 @@ static inline double get_time(void) {
 }
 
 static inline void help(char *name) {
-  printf("Usage ./%s -t  target_pid -i signal -s seconds -n nanoseconds\n",
+  printf("Usage ./%s -t  target_pid -i signal1[,signal2,...] [-s seconds] [-n nanoseconds]\n",
          name);
 }
 
 int main(int argc, char **argv) {
   double boot_time = 0;
-  int res, opt, recv_sig;
+  int res, opt, recv_sig=0;
   struct sigaction sa;
   struct sigevent event;
   struct itimerspec timer_spec;
@@ -40,21 +40,45 @@ int main(int argc, char **argv) {
     opt = getopt(argc, argv, "-ht:i:s:n:");
     switch (opt) {
     case 'i':
-      signal_to_send = strtol(optarg, NULL, 10);
-      if (signal_to_send < MIGRATION_SIGNAL ||
-          signal_to_send > MIGRATION_SIGNAL + DUMMY_SIGNALS +
+      char* tmp_signal=NULL;
+      int signal_to_send=0;
+      tmp_signal=strtok(optarg,";,");
+      while(tmp_signal!=NULL){
+      signal_to_send = strtol(tmp_signal, NULL, 10);
+      if (signal_to_send < 0 ||
+          signal_to_send > DUMMY_SIGNALS +
                                (SW_DSTS * SW_MODES) + (HW_DSTS + HW_MODES)) {
         fprintf(stderr, "Signal out of range\n");
         help(argv[0]);
         return -1;
       }
-      signal_to_send = (int)signal_to_send;
+      num_signals_to_send++;
+      if(signals_to_send==NULL){
+	      signals_to_send=malloc(sizeof(int));
+	      if(signals_to_send==NULL){
+        	fprintf(stderr, "Cannot allocate memory for signal list\n");
+		return -1;
+	      }
+
+      } else{
+		int* new_signals_to_send=reallocarray(signals_to_send,num_signals_to_send,sizeof(int));
+	      if(new_signals_to_send==NULL){
+        	fprintf(stderr, "Cannot reallocate memory for signal list\n");
+		free(signals_to_send);
+		return -1;
+	      }
+	      signals_to_send=new_signals_to_send;
+      }
+      signals_to_send[num_signals_to_send-1]= MIGRATION_SIGNAL + signal_to_send;
+      tmp_signal=strtok(NULL,",");
+      }
       break;
     case 's':
       period_sec = strtol(optarg, NULL, 10);
       if (period_sec < LONG_MIN || period_sec > LONG_MAX) {
         fprintf(stderr, "period seconds out of range\n");
         help(argv[0]);
+		free(signals_to_send);
         return -1;
       }
       break;
@@ -63,6 +87,7 @@ int main(int argc, char **argv) {
       if (period_nsec < LONG_MIN || period_nsec > LONG_MAX) {
         fprintf(stderr, "period nanoseconds out of range\n");
         help(argv[0]);
+		free(signals_to_send);
         return -1;
       }
       break;
@@ -71,35 +96,43 @@ int main(int argc, char **argv) {
       if (target < LONG_MIN || target > LONG_MAX) {
         fprintf(stderr, "target PID out of range\n");
         help(argv[0]);
+		free(signals_to_send);
         return -1;
       }
       break;
     }
   } while (opt != -1);
-  if (signal_to_send == 0 || (period_sec == 0 && period_nsec == 0) ||
+  if (num_signals_to_send == 0 ||
       target == 0) {
-    fprintf(stderr, "You need both signal, period and target\n");
+    fprintf(stderr, "You need both signal and target\n");
     help(argv[0]);
+		free(signals_to_send);
+    return -1;
+  }
+  if (num_signals_to_send == 0 && (period_sec <=0 && period_nsec <=0)) {
+    fprintf(stderr, "You need to have a period to send multiple signals\n");
+    help(argv[0]);
+		free(signals_to_send);
     return -1;
   }
   res = sigaddset(&mask, SIGRTMAX);
   if (res < 0) {
     fprintf(stderr, "Cannot add SIGRTMAX to mask\n");
+		free(signals_to_send);
     return -1;
   }
   res = sigaddset(&mask, SIGINT);
   if (res < 0) {
     fprintf(stderr, "Cannot add SIGINT to mask\n");
+		free(signals_to_send);
     return -1;
   }
   res = sigprocmask(SIG_BLOCK, &mask, NULL);
   if (res < 0) {
     fprintf(stderr, "Cannot block SIGRTMAX to mask\n");
+		free(signals_to_send);
     return -1;
   }
-  printf("will send %d to %d every %lds and %ldns\n", signal_to_send, target,
-         period_sec, period_nsec);
-
   initial_delay.tv_sec = period_sec;
   initial_delay.tv_nsec = period_nsec;
   memset(&event, 0, sizeof(event));
@@ -111,6 +144,7 @@ int main(int argc, char **argv) {
   res = timer_create(CLOCK_REALTIME, &event, &period_timer);
   if (res != 0) {
     perror("Error during HR timer creation");
+		free(signals_to_send);
     return res;
   }
   FILE *file = fopen("interupts.log", "w");
@@ -129,26 +163,34 @@ int main(int argc, char **argv) {
     perror("Error during timer setup");
     timer_delete(period_timer);
     fclose(file);
+		free(signals_to_send);
     return res;
   }
   boot_time = get_time();
   do {
+    if (recv_sig == SIGRTMAX || num_signals_to_send >1) {
     res = sigwait(&mask, &recv_sig);
     if (res > 0) {
       perror("cannot wait for timer");
       fclose(file);
       timer_delete(period_timer);
+		free(signals_to_send);
       return -1;
     }
-    if (recv_sig == SIGRTMAX) {
-      fprintf(file, "%lf\n", get_time() - boot_time);
-      res = kill(target, signal_to_send);
+    }
+    if (recv_sig != SIGINT) {
+    fprintf(file, "%lf\n", get_time() - boot_time);
+      res = kill(target, signals_to_send[period_id%num_signals_to_send]);
       if (res < 0) {
         perror("Cannot send signal to target process\n");
+	return -1;
       }
+  printf("sent %d to %d. Next period in %lds and %ldns\n", signals_to_send[period_id%num_signals_to_send], target,
+         period_sec, period_nsec);
     }
-  } while (recv_sig != SIGINT);
-  timer_delete(period_timer);
+period_id++;
+  } while (recv_sig == SIGRTMAX && num_signals_to_send >1);
+  timer_delete(period_timer); free(signals_to_send);
   fclose(file);
   return 0;
 }
