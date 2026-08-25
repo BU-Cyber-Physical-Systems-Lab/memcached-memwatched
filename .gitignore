@@ -1,2 +1,2 @@
-bin
-bin/*
+.*
+copy_on_server
