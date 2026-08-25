@@ -174,7 +174,7 @@ int main(int argc, char **argv) {
     free(signals_to_send);
     return res;
   }
-  FILE *file = fopen("interupts.log", "w");
+  FILE *file = fopen("interrupts.log", "w");
   if (file == NULL) {
     perror("Cannot open output file");
     timer_delete(period_timer);
