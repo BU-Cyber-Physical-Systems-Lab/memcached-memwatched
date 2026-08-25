@@ -19,7 +19,7 @@ static struct migration_dst *hw_dsts;
 /// Number of detected async destinations
 static size_t hw_dsts_count = 0;
 /// The amount of logs to print
-static int verbose=0;
+static int verbose = 0;
 
 /**@brief Select destination from migration destination address.
  * @param[in] engine The from which destinations are searched.
@@ -80,12 +80,13 @@ static inline int trigger_migration(struct migration_dst dst,
   } else {
     migration_size = heap_size_pages - 1;
   }
-  if(verbose > 1){
-  printf(
-      "DEBUG: heap size %lu destination size %lu chosen migration size %lu\n",
-      heap_size_pages, dst.size / getpagesize(), migration_size);
-  printf("DEBUG: migrating pages to destination %d (start at 0x%lx) with size %lu\n", dst_id,
-        dst.start, migration_size);
+  if (verbose > 1) {
+    printf(
+        "DEBUG: heap size %lu destination size %lu chosen migration size %lu\n",
+        heap_size_pages, dst.size / getpagesize(), migration_size);
+    printf("DEBUG: migrating pages to destination %d (start at 0x%lx) with "
+           "size %lu\n",
+           dst_id, dst.start, migration_size);
   }
   res = migrate_pages_to_dst(migration_source, migration_size, engine, dst_id,
                              mode);
@@ -123,13 +124,13 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
             heap_size_pages);
     return;
   }
-  if(verbose > 1){
-  printf("DEBUG: signal offset is %d\n", signal_offset);
+  if (verbose > 1) {
+    printf("DEBUG: signal offset is %d\n", signal_offset);
   }
   // 0 to DUMMY_SIGNALS -1 -> we fake the migration
   if (signal_offset < DUMMY_SIGNALS) {
-  if(verbose > 1){
-    printf("DEBUG: selected DUMMY handler\n");
+    if (verbose > 1) {
+      printf("DEBUG: selected DUMMY handler\n");
     }
     return;
   } else {
@@ -142,27 +143,27 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
       engine = MIGRATION_ENGINE_SW;
       switch (signal_offset % selected_modes) {
       case 0:
-  if(verbose > 1){
-        printf("DEBUG: selected SW SYNC migration\n");
-	}
+        if (verbose > 1) {
+          printf("DEBUG: selected SW SYNC migration\n");
+        }
         mode = MIGRATION_MODE_SYNC;
         break;
       case 1:
-  if(verbose > 1){
-        printf("DEBUG: selected SW SYNC LIGHT migration\n");
-	}
+        if (verbose > 1) {
+          printf("DEBUG: selected SW SYNC LIGHT migration\n");
+        }
         mode = MIGRATION_MODE_SYNC_LIGHT;
         break;
       case 2:
-  if(verbose > 1){
-        printf("DEBUG: selected SW SYNC NO COPY migration\n");
-  }
+        if (verbose > 1) {
+          printf("DEBUG: selected SW SYNC NO COPY migration\n");
+        }
         mode = MIGRATION_MODE_SYNC_NO_COPY;
         break;
       case 3:
-  if(verbose > 1){
-        printf("DEBUG: selected SW ASYNC migration\n");
-	}
+        if (verbose > 1) {
+          printf("DEBUG: selected SW ASYNC migration\n");
+        }
         mode = MIGRATION_MODE_ASYNC;
         break;
       default:
@@ -181,9 +182,9 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
         engine = MIGRATION_ENGINE_LOCUSTA;
         switch (signal_offset % selected_modes) {
         case 0:
-  if(verbose > 1){
-          printf("DEBUG: selected HW ASYNC migration\n");
-	  }
+          if (verbose > 1) {
+            printf("DEBUG: selected HW ASYNC migration\n");
+          }
           mode = MIGRATION_MODE_ASYNC;
           break;
         default:
@@ -216,11 +217,13 @@ static inline void print_destinations(struct migration_dst *dsts,
   int i;
   printf("Found %lu destinations: \n", count);
   for (i = 0; i < count; i++) {
-    printf("\t %d: %s, size: %ld start: 0x%lx\n", i, dsts[i].name, dsts[i].size,dsts[i].start);
+    printf("\t %d: %s, size: %ld start: 0x%lx\n", i, dsts[i].name, dsts[i].size,
+           dsts[i].start);
   }
 }
 
-int setup_migration(void *source, size_t offset, size_t size,int verbose_level) {
+int setup_migration(void *source, size_t offset, size_t size,
+                    int verbose_level) {
   int res = -1;
   verbose = verbose_level;
   sigset_t mask;
@@ -247,9 +250,9 @@ int setup_migration(void *source, size_t offset, size_t size,int verbose_level) 
     fprintf(stderr, "ERROR: Cannot enumerate software migration destinations!");
     return res;
   }
-  if(verbose > 0){
-  printf("SW destinations for migration:\n");
-  print_destinations(sw_dsts, sw_dsts_count);
+  if (verbose > 0) {
+    printf("SW destinations for migration:\n");
+    print_destinations(sw_dsts, sw_dsts_count);
   }
   res = migration_list_destinations(MIGRATION_ENGINE_LOCUSTA, &hw_dsts,
                                     &hw_dsts_count);
@@ -257,10 +260,10 @@ int setup_migration(void *source, size_t offset, size_t size,int verbose_level) 
     fprintf(stderr, "ERROR: Cannot enumerate locusta migration destinations!");
     return res;
   }
-  if(verbose > 0){
-  printf("HW destinations for migration:\n");
-  print_destinations(hw_dsts, hw_dsts_count);
-  printf("DEBUG: Setting up migration signals\n");
+  if (verbose > 0) {
+    printf("HW destinations for migration:\n");
+    print_destinations(hw_dsts, hw_dsts_count);
+    printf("DEBUG: Setting up migration signals\n");
   }
   for (int i = 0;
        i < DUMMY_SIGNALS + (SW_MODES * SW_DSTS) + (HW_MODES * HW_DSTS); i++) {
@@ -273,13 +276,13 @@ int setup_migration(void *source, size_t offset, size_t size,int verbose_level) 
   }
   migration_source = source;
   heap_size_pages = size;
-  if(verbose > 0){
-  printf("DEBUG: migration setup done\n");
+  if (verbose > 0) {
+    printf("DEBUG: migration setup done\n");
   }
   if (offset > 0) {
-  if(verbose > 0){
-    printf("DEBUG: triggering premigration to 0x%lx\n", offset);
-  }
+    if (verbose > 0) {
+      printf("DEBUG: triggering premigration to 0x%lx\n", offset);
+    }
     struct migration_dst *premigration_dst =
         select_dst_from_addr(MIGRATION_ENGINE_SW, offset);
     trigger_migration(*premigration_dst, MIGRATION_ENGINE_SW,

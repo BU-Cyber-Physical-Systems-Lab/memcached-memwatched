@@ -69,7 +69,6 @@ clean-memcached:
 	git -C $(MEMCACHED_SRC_FLDR) clean -fxd
 
 clean-rt-bench:
-	#make -C src/rt-bench clean
 	git -C $(RTBENCH_SRC_FLDR)/dlmalloc restore .
 	git -C $(RTBENCH_SRC_FLDR) restore .
 	git -C $(RTBENCH_SRC_FLDR) clean -fxd

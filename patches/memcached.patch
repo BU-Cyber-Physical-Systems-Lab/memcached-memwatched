@@ -40,7 +40,7 @@ index a7a11ad..79bbcaa 100644
  memcached_debug_DEPENDENCIES =
  CLEANFILES=
 diff --git a/memcached.c b/memcached.c
-index 8611661..f8959da 100644
+index 8611661..a5a8321 100644
 --- a/memcached.c
 +++ b/memcached.c
 @@ -61,6 +61,9 @@
@@ -104,9 +104,9 @@ index 8611661..f8959da 100644
 +            }
 +          }
 +          settings.heap_location = location;
-+	  if(settings.verbose >0){
-+          printf("DEBUG: heap location: %s\n",settings.heap_location);
-+	  }
++          if(settings.verbose >0){
++            printf("DEBUG: heap location: %s\n", settings.heap_location);
++          }
 +          char heap_size_magnitude='\0';
 +          size_t heap_size=0;
 +          size_t heap_start=0;
@@ -118,9 +118,9 @@ index 8611661..f8959da 100644
 +            }
 +          }
 +          settings.heap_start = heap_start;
-+	  if(settings.verbose >0){
-+          printf("DEBUG: heap start: 0x%lx\n",heap_start);
-+	  }
++          if(settings.verbose >0){
++            printf("DEBUG: heap start: 0x%lx\n",heap_start);
++          }
 +          res = sscanf(size, "%zu%1c", &heap_size, &heap_size_magnitude);
 +          if (res < 1 || res == EOF) {
 +            perror(
@@ -147,9 +147,9 @@ index 8611661..f8959da 100644
 +            exit(EX_USAGE);
 +          }
 +          settings.heap_size=heap_size;
-+	  if(settings.verbose>0){
-+          printf("DEBUG: heap size %lu\n",heap_size);
-+	  }
++          if(settings.verbose>0){
++            printf("DEBUG: heap size %lu\n",heap_size);
++          }
 +          break;
          case 'A':
              /* enables "shutdown" command */
@@ -161,19 +161,19 @@ index 8611661..f8959da 100644
 +    printf("Done parsing args\n");
 +
 +    if(settings.heap_size != 0){
-+	if(settings.verbose>0){
-+      printf("Starting memory watcher\n");
-+	}
++        if(settings.verbose>0){
++          printf("Starting memory watcher\n");
++        }
 +      void* heap_mapping=start_memory_watcher(settings.heap_size,NULL,settings.heap_location);
-+	if(settings.verbose>0){
-+      printf("Memory watcher ready at %p\n",heap_mapping);
-+      printf("setting up migration handler\n");
-+	}
++      if(settings.verbose>0){
++        printf("Memory watcher ready at %p\n",heap_mapping);
++        printf("setting up migration handler\n");
++      }
 +      setup_migration(heap_mapping,settings.heap_start, settings.heap_size/getpagesize(),settings.verbose);
++      if(settings.verbose>0){
++        printf("Memory watcher and migration handlers are ready\n");
++      }
 +    }
-+	if(settings.verbose>0){
-+    printf("Memory watcher and migration handlers are ready\n");
-+	}
  
      if (settings.num_napi_ids > settings.num_threads) {
          fprintf(stderr, "Number of napi_ids(%d) cannot be greater than number of threads(%d)\n",
