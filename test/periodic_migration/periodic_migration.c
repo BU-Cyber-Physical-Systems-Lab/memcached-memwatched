@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
   struct sigaction sa;
   struct sigevent event;
   struct itimerspec timer_spec;
-  struct timespec initial_delay = {0, 1}, period = {0};
+  struct timespec initial_delay = {0, 1}, period = {0, 0};
   sigset_t mask;
   res = sigemptyset(&mask);
   if (res < 0) {
