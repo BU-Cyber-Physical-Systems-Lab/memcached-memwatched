@@ -18,7 +18,7 @@ static inline double get_time(void) {
 }
 
 static inline void help(char *name) {
-  printf("Usage ./%s -t  target_pid -i signal1[,signal2,...] [-p period] [-d "
+  printf("Usage ./%s -t target_pid -s signal1[,signal2,...] [-p period] [-d "
          "initial delay]\n",
          name);
 }
