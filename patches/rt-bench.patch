@@ -25,7 +25,7 @@ diff --git a/generator/src/dlmalloc b/generator/src/dlmalloc
 -Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3
 +Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3-dirty
 diff --git a/generator/src/memory_watcher.c b/generator/src/memory_watcher.c
-index 1c2d310..0e1182a 100644
+index 1c2d310..81718ba 100644
 --- a/generator/src/memory_watcher.c
 +++ b/generator/src/memory_watcher.c
 @@ -165,8 +165,8 @@ static int translate_va(u64 vaddr) {
@@ -196,10 +196,22 @@ index 1c2d310..0e1182a 100644
    default:
      elogf(LOG_LEVEL_ERR, "Invalid memory watcher status: %d.\n",
            memory_watcher_config.status);
-@@ -642,4 +606,4 @@ void __wrap_free(void *ptr) {
+@@ -642,4 +606,17 @@ void __wrap_free(void *ptr) {
      }
      elogf(LOG_LEVEL_DEBUG, "wrapped free done\n");
    }
--}
-\ No newline at end of file
 +}
++
++/// The symbol that corresponds to the real `calloc()`, after the linker has
++/// done the wrapping.
++extern void *__real_calloc(size_t n, size_t size);
++
++/// Make calloc behave the same but use the wrapped malloc got get memory
++void *__wrap_calloc(size_t n, size_t size) {
++  void *ptr = __wrap_malloc(n * size);
++  if (ptr != NULL) {
++    memset(ptr, 0, n * size);
++  }
++  return ptr;
+ }
+\ No newline at end of file

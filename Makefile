@@ -5,7 +5,7 @@
 # @version 0.1
 SHELL:= bash
 .SHELLFLAGS:= -eu -o pipefail -c
-.PHONY: clean setup all clean-rt-bench clean-memcached clean-mutilate
+.PHONY: clean setup all clean-rt-bench clean-memcached clean-mutilate server clean-server clean-migration
 
 BASE_FLDR=$(abspath $(lastword $(dir $(MAKEFILE_LIST))))
 PATCH_FLDR=$(BASE_FLDR)/patches
@@ -23,7 +23,7 @@ STRIP=$(CROSS_COMPILE)STRIP
 CONFIGURE_OPTS+= --host=x86_64
 endif
 
-all: $(MEMCACHED_SRC_FLDR)/memcached $(MUTILATE_SRC_FLDR)/mutilate $(MIGRATION_SRC_FLDR)/periodic_migration
+all: $(MEMCACHED_SRC_FLDR)/memcached $(MUTILATE_SRC_FLDR)/mutilate $(MIGRATION_SRC_FLDR)/periodic_migration server
 setup: $(MEMCACHED_SRC_FLDR)/README.md src/rt-bench/README.md $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MUTILATE_SRC_FLDR)/README.md
 
 $(MEMCACHED_SRC_FLDR)/README.md:
@@ -58,7 +58,19 @@ $(MUTILATE_SRC_FLDR)/mutilate: $(MUTILATE_SRC_FLDR)/README.md  $(MUTILATE_SRC_FL
 $(MIGRATION_SRC_FLDR)/periodic_migration:
 	make -C $(MIGRATION_SRC_FLDR) clean
 
-clean: clean-memcached clean-mutilate clean-rt-bench clean-migration
+server: $(MIGRATION_SRC_FLDR)/periodic_migration $(MEMCACHED_SRC_FLDR)/memcached $(SCRIPT_SRC_FLDR)/trigger_migration.sh $(SCRIPT_SRC_FLDR)/start_memcached.sh $(SCRIPT_SRC_FLDR)/get_memcached_libs.sh
+	mkdir -p copy_on_server/memcached/lib
+	cp $(MIGRATION_SRC_FLDR)/periodic_migration copy_on_sever/
+    cp $(MEMCACHED_SRC_FLDR)/memcached copy_on_server/
+	cp $(SCRIPT_SRC_FLDR)/trigger_migration.sh copy_on_server/
+	cp $(SCRIPT_SRC_FLDR)/start_memcached.sh copy_on_server/
+	./$(SCRIPT_SRC_FLDR)/get_memcached_libs.sh copy_on_server/memcached copy_on_server/lib
+	./$(SCRIPT_SRC_FLDR)/get_memcached_libs.sh copy_on_server/periodic_mirgation copy_on_server/lib
+
+clean: clean-memcached clean-mutilate clean-rt-bench clean-migration clean-server
+
+clean-server:
+	-rm -r copy_on_server
 
 clean-migration:
 	make -C $(MIGRATION_SRC_FLDR) clean

@@ -1,5 +1,5 @@
 diff --git a/Makefile.am b/Makefile.am
-index a7a11ad..79bbcaa 100644
+index a7a11ad..c59f951 100644
 --- a/Makefile.am
 +++ b/Makefile.am
 @@ -34,7 +34,15 @@ memcached_SOURCES = memcached.c memcached.h \
@@ -34,7 +34,7 @@ index a7a11ad..79bbcaa 100644
 -memcached_LDFLAGS =
 -memcached_debug_LDFLAGS =
 +memcached_LDADD = -lpage_migration_lib -lrt
-+memcached_LDFLAGS = -Wl,--wrap=free -Wl,--wrap=malloc -Wl,--wrap=mmap -I../rt-bench/generator/include/ -I../locusta_utils -I../page_migration -L../page_migration -L../../lib/
++memcached_LDFLAGS = -Wl,--wrap=free -Wl,--wrap=calloc -Wl,--wrap=malloc -Wl,--wrap=mmap -I../rt-bench/generator/include/ -I../locusta_utils -I../page_migration -L../page_migration -L../../lib/
 +memcached_debug_LDFLAGS = $(memcached_LDFLAGS)
  memcached_DEPENDENCIES =
  memcached_debug_DEPENDENCIES =
