@@ -7,11 +7,10 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <math.h>
+#include <errno.h>
+#include <fenv.h>
 
-timer_t period_timer;
-static long period_sec = 0, period_nsec = 0;
-static int num_signals_to_send = 0,*signals_to_send=NULL, period_id=0;
-pid_t target = 0;
 static inline double get_time(void) {
   struct timeval tv;
   gettimeofday(&tv, NULL);
@@ -19,17 +18,21 @@ static inline double get_time(void) {
 }
 
 static inline void help(char *name) {
-  printf("Usage ./%s -t  target_pid -i signal1[,signal2,...] [-s seconds] [-n nanoseconds]\n",
+  printf("Usage ./%s -t  target_pid -i signal1[,signal2,...] [-p period] [-d initial delay]\n",
          name);
 }
 
 int main(int argc, char **argv) {
-  double boot_time = 0;
+int num_signals_to_send = 0,*signals_to_send=NULL, period_id=0;
+pid_t target = 0;
   int res, opt, recv_sig=0;
+  double time_spec;
+  long seconds, nanoseconds;
+  timer_t period_timer;
   struct sigaction sa;
   struct sigevent event;
   struct itimerspec timer_spec;
-  struct timespec initial_delay;
+  struct timespec initial_delay,period;
   sigset_t mask;
   res = sigemptyset(&mask);
   if (res < 0) {
@@ -37,9 +40,9 @@ int main(int argc, char **argv) {
     return -1;
   }
   do {
-    opt = getopt(argc, argv, "-ht:i:s:n:");
+    opt = getopt(argc, argv, "-ht:s:d:p:");
     switch (opt) {
-    case 'i':
+    case 's':
       char* tmp_signal=NULL;
       int signal_to_send=0;
       tmp_signal=strtok(optarg,";,");
@@ -73,23 +76,46 @@ int main(int argc, char **argv) {
       tmp_signal=strtok(NULL,",");
       }
       break;
-    case 's':
-      period_sec = strtol(optarg, NULL, 10);
-      if (period_sec < LONG_MIN || period_sec > LONG_MAX) {
-        fprintf(stderr, "period seconds out of range\n");
-        help(argv[0]);
-		free(signals_to_send);
-        return -1;
-      }
-      break;
-    case 'n':
-      period_nsec = strtol(optarg, NULL, 10);
-      if (period_nsec < LONG_MIN || period_nsec > LONG_MAX) {
-        fprintf(stderr, "period nanoseconds out of range\n");
-        help(argv[0]);
-		free(signals_to_send);
-        return -1;
-      }
+    case 'p':
+    case 'd':
+    // common operations to convert the delay or period from a decimal number
+    // to itimerspec values
+    time_spec = strtod(optarg, NULL);
+    if (errno != 0) {
+      perror(
+                   "Error during period or deadline parsing");
+    }
+
+    seconds = lround(trunc(time_spec));
+// fetestexcept skipped. Valid operation as ieee-754 does not enforce its
+// implementation.
+#if __riscv
+#else
+    res = fetestexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW | FE_UNDERFLOW);
+#endif
+    if (res != 0) {
+     perror("Error during conversion in seconds");
+    }
+    nanoseconds = lround((time_spec - trunc(time_spec)) * 1000000000);
+// fetestexcept skipped. Valid operation as ieee-754 does not enforce its
+// implementation.
+#if __riscv
+#else
+    res = fetestexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW | FE_UNDERFLOW);
+#endif
+    if (res != 0) {
+      perror("Error during conversion in nanoseconds");
+    }
+switch(opt){
+	case 'p':
+  period.tv_sec = seconds;
+  period.tv_nsec = nanoseconds;
+		break;
+	case 'd':
+  initial_delay.tv_sec = seconds;
+  initial_delay.tv_nsec = nanoseconds;
+		break;
+}
       break;
     case 't':
       target = strtoul(optarg, NULL, 10);
@@ -109,7 +135,7 @@ int main(int argc, char **argv) {
 		free(signals_to_send);
     return -1;
   }
-  if (num_signals_to_send == 0 && (period_sec <=0 && period_nsec <=0)) {
+  if (num_signals_to_send > 1 && (period.tv_sec <=0 && period.tv_nsec <=0)) {
     fprintf(stderr, "You need to have a period to send multiple signals\n");
     help(argv[0]);
 		free(signals_to_send);
@@ -133,8 +159,6 @@ int main(int argc, char **argv) {
 		free(signals_to_send);
     return -1;
   }
-  initial_delay.tv_sec = period_sec;
-  initial_delay.tv_nsec = period_nsec;
   memset(&event, 0, sizeof(event));
   // the timer will generate a signal
   event.sigev_notify = SIGEV_SIGNAL;
@@ -155,8 +179,7 @@ int main(int argc, char **argv) {
   }
   // setting when the timer must be fired, using the provided deadline
   // parameters
-  timer_spec.it_interval.tv_sec = period_sec;
-  timer_spec.it_interval.tv_nsec = period_nsec;
+  timer_spec.it_interval = period;
   timer_spec.it_value = initial_delay;
   res = timer_settime(period_timer, 0, &timer_spec, NULL);
   if (res < 0) {
@@ -166,9 +189,8 @@ int main(int argc, char **argv) {
 		free(signals_to_send);
     return res;
   }
-  boot_time = get_time();
   do {
-    if (recv_sig == SIGRTMAX || num_signals_to_send >1) {
+    if (initial_delay.tv_sec > 0 || initial_delay.tv_nsec >0) {
     res = sigwait(&mask, &recv_sig);
     if (res > 0) {
       perror("cannot wait for timer");
@@ -179,17 +201,17 @@ int main(int argc, char **argv) {
     }
     }
     if (recv_sig != SIGINT) {
-    fprintf(file, "%lf\n", get_time() - boot_time);
+    fprintf(file, "%lf\n", get_time());
       res = kill(target, signals_to_send[period_id%num_signals_to_send]);
       if (res < 0) {
         perror("Cannot send signal to target process\n");
 	return -1;
       }
   printf("sent %d to %d. Next period in %lds and %ldns\n", signals_to_send[period_id%num_signals_to_send], target,
-         period_sec, period_nsec);
+         period.tv_sec, period.tv_nsec);
     }
 period_id++;
-  } while (recv_sig == SIGRTMAX && num_signals_to_send >1);
+  } while (recv_sig == SIGRTMAX && (period.tv_sec >0 || period.tv_nsec>0 ));
   timer_delete(period_timer); free(signals_to_send);
   fclose(file);
   return 0;

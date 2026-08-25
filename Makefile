@@ -12,6 +12,7 @@ PATCH_FLDR=$(BASE_FLDR)/patches
 RTBENCH_SRC_FLDR=src/rt-bench/generator/src
 MEMCACHED_SRC_FLDR=src/memcached
 MUTILATE_SRC_FLDR=test/mutilate
+MIGRATION_SRC_FLDR=test/periodic_migration
 MUTILATE_PATCH?= mutilate.patch
 
 ifdef CROSS_COMPILE 
@@ -22,7 +23,7 @@ STRIP=$(CROSS_COMPILE)STRIP
 CONFIGURE_OPTS+= --host=x86_64
 endif
 
-all: $(BIN_FLDR)/memcached-debug $(BIN_FLDR)/memcached $(BIN_FLDR)/mutilate
+all: $(MEMCACHED_SRC_FLDR)/memcached $(MUTILATE_SRC_FLDR)/mutilate $(MIGRATION_SRC_FLDR)/periodic_migration
 setup: $(MEMCACHED_SRC_FLDR)/README.md src/rt-bench/README.md $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MUTILATE_SRC_FLDR)/README.md
 
 $(MEMCACHED_SRC_FLDR)/README.md:
@@ -40,7 +41,7 @@ $(MEMCACHED_SRC_FLDR)/configure:
 $(MEMCACHED_SRC_FLDR)/Makefile: $(MEMCACHED_SRC_FLDR)/README.md $(MEMCACHED_SRC_FLDR)/configure
 	cd $(MEMCACHED_SRC_FLDR) &&  export CC="$(CC)" &&  ./configure $(CONFIGURE_OPTS)
 
-$(MEMCACHED_SRC_FLDR)/memcached-debug $(MEMCACHED_SRC_FLDR)/memcached: $(MEMCACHED_SRC_FLDR)/Makefile $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MEMCACHED_SRC_FLDR)/*.c $(MEMCACHED_SRC_FLDR)/*.h
+$(MEMCACHED_SRC_FLDR)/memcached: $(MEMCACHED_SRC_FLDR)/Makefile $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MEMCACHED_SRC_FLDR)/*.c $(MEMCACHED_SRC_FLDR)/*.h
 	@git -C $(RTBENCH_SRC_FLDR) apply $(PATCH_FLDR)/rt-bench.patch --check --reverse || git -C $(RTBENCH_SRC_FLDR) apply $(PATCH_FLDR)/rt-bench.patch
 	@git -C $(RTBENCH_SRC_FLDR)/dlmalloc apply --check --reverse ../dlmalloc.patch || git -C $(RTBENCH_SRC_FLDR)/dlmalloc apply ../dlmalloc.patch
 	@git -C $(MEMCACHED_SRC_FLDR) apply $(PATCH_FLDR)/memcached.patch --check --reverse || git -C $(MEMCACHED_SRC_FLDR) apply $(PATCH_FLDR)/memcached.patch
@@ -54,8 +55,13 @@ $(MUTILATE_SRC_FLDR)/mutilate: $(MUTILATE_SRC_FLDR)/README.md  $(MUTILATE_SRC_FL
 	sed -i "/env.Append(LIBPATH/ i\env.Append(LIBPATH= [\'$(LIBPATH)\'])" test/mutilate/SConstruct
 	scons -C $(MUTILATE_SRC_FLDR)
 
+$(MIGRATION_SRC_FLDR)/periodic_migration:
+	make -C $(MIGRATION_SRC_FLDR) clean
 
-clean: clean-memcached clean-mutilate clean-rt-bench
+clean: clean-memcached clean-mutilate clean-rt-bench clean-migration
+
+clean-migration:
+	make -C $(MIGRATION_SRC_FLDR) clean
 
 clean-memcached:
 	-make -C $(MEMCACHED_SRC_FLDR) clean
