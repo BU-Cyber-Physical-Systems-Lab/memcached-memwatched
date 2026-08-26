@@ -18,6 +18,19 @@ index 64c30ca..71079f4 100644
 -#endif
 +#endif
 \ No newline at end of file
+diff --git a/generator/rtbench.mk b/generator/rtbench.mk
+index 50c17b9..305b0c8 100644
+--- a/generator/rtbench.mk
++++ b/generator/rtbench.mk
+@@ -21,7 +21,7 @@ RTBENCH_SRC_FLDR=$(RTBENCH_GENERATOR_DIR)/src
+ override CFLAGS+=-Og -Wall -g -I$(RTBENCH_H_FLDR) -DGCC
+ 
+ # Add linker's flags
+-override LDFLAGS+=-lrt -lm -pthread  -Wl,--wrap=free -Wl,--wrap=malloc -Wl,--wrap=mmap
++override LDFLAGS+=-lrt -lm -pthread  -Wl,--wrap=free -Wl,--wrap=malloc -Wl,--wrap=mmap -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=strdup
+ 
+ #optional features
+ 
 diff --git a/generator/src/dlmalloc b/generator/src/dlmalloc
 --- a/generator/src/dlmalloc
 +++ b/generator/src/dlmalloc
@@ -25,7 +38,7 @@ diff --git a/generator/src/dlmalloc b/generator/src/dlmalloc
 -Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3
 +Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3-dirty
 diff --git a/generator/src/memory_watcher.c b/generator/src/memory_watcher.c
-index 1c2d310..81718ba 100644
+index 1c2d310..99736d2 100644
 --- a/generator/src/memory_watcher.c
 +++ b/generator/src/memory_watcher.c
 @@ -165,8 +165,8 @@ static int translate_va(u64 vaddr) {
@@ -196,7 +209,7 @@ index 1c2d310..81718ba 100644
    default:
      elogf(LOG_LEVEL_ERR, "Invalid memory watcher status: %d.\n",
            memory_watcher_config.status);
-@@ -642,4 +606,17 @@ void __wrap_free(void *ptr) {
+@@ -642,4 +606,129 @@ void __wrap_free(void *ptr) {
      }
      elogf(LOG_LEVEL_DEBUG, "wrapped free done\n");
    }
@@ -206,12 +219,124 @@ index 1c2d310..81718ba 100644
 +/// done the wrapping.
 +extern void *__real_calloc(size_t n, size_t size);
 +
++/// The symbol that corresponds to the armMbed version of `calloc()`, which we
++/// are using when the user requests as fixed size heap.
++extern void *dlcalloc(size_t n, size_t size);
++
 +/// Make calloc behave the same but use the wrapped malloc got get memory
 +void *__wrap_calloc(size_t n, size_t size) {
-+  void *ptr = __wrap_malloc(n * size);
-+  if (ptr != NULL) {
-+    memset(ptr, 0, n * size);
++  int res;
++  elogf(LOG_LEVEL_DEBUG, "wapper calloc with item number %zu size %zu\n", n,
++        size);
++  void *pointer = NULL, *current_program_break = NULL;
++  enum memory_watcher_states current_status;
++  __atomic_load(&(memory_watcher_config.status), &current_status,
++                __ATOMIC_SEQ_CST);
++  if (current_status >= MEMORY_WATCHER_ENABLED) {
++    res = sem_wait(&(memory_watcher_config.mutex));
++    if (res < 0) {
++      perror("Cannot wait on memory watcher mutex during malloc");
++      return NULL;
++    }
++    // recheck the memory watcher status, in case it was disabled when we were
++    // sleeping
++    __atomic_load(&(memory_watcher_config.status), &current_status,
++                  __ATOMIC_SEQ_CST);
 +  }
-+  return ptr;
++  void *(*calloc)(size_t, size_t) =
++      (current_status >= MEMORY_WATCHER_INITIALIZING) ? dlcalloc
++                                                      : __real_calloc;
++
++  elogf(LOG_LEVEL_DEBUG, "wrapped calloc mem watcher config status:%d \n",
++        memory_watcher_config.status);
++  elogf(LOG_LEVEL_DEBUG,
++        "wrapped calloc \t real_calloc address: %p, dlcalloc %p, selected: %s "
++        "(%p)\n",
++        __real_calloc, dlcalloc,
++        (calloc == __real_calloc) ? "real_calloc" : "dlcalloc", calloc);
++  pointer = (calloc)(n, size);
++  elogf(LOG_LEVEL_DEBUG, "Allocation done at: %p\n", pointer);
++  if (translate_va((u64)pointer) < 0) {
++    elogf(LOG_LEVEL_ERR, "Cannot translate pointer %p\n", pointer);
++    sem_post(&(memory_watcher_config.mutex));
++    return NULL;
++  }
++  if (current_status >= MEMORY_WATCHER_ENABLED) {
++    res = sem_post(&(memory_watcher_config.mutex));
++    if (res < 0) {
++      perror("Cannot post on memory watcher mutex during calloc");
++      return NULL;
++    }
++  }
++  return pointer;
++}
++
++/// The symbol that corresponds to the real `realloc()`, after the linker has
++/// done the wrapping.
++extern void *__real_realloc(void *p, size_t size);
++
++/// The symbol that corresponds to the armMbed version of `realloc()`, which we
++/// are using when the user requests as fixed size heap.
++extern void *dlrealloc(void *p, size_t size);
++
++/// Make calloc behave the same but use the wrapped malloc got get memory
++void *__wrap_realloc(void *p, size_t size) {
++  int res;
++  elogf(LOG_LEVEL_DEBUG, "wapper realloc with pointer %p size %zu\n", p, size);
++  void *pointer = NULL, *current_program_break = NULL;
++  enum memory_watcher_states current_status;
++  __atomic_load(&(memory_watcher_config.status), &current_status,
++                __ATOMIC_SEQ_CST);
++  if (current_status >= MEMORY_WATCHER_ENABLED) {
++    res = sem_wait(&(memory_watcher_config.mutex));
++    if (res < 0) {
++      perror("Cannot wait on memory watcher mutex during realloc");
++      return NULL;
++    }
++    // recheck the memory watcher status, in case it was disabled when we were
++    // sleeping
++    __atomic_load(&(memory_watcher_config.status), &current_status,
++                  __ATOMIC_SEQ_CST);
++  }
++  void *(*realloc)(void *, size_t) =
++      (current_status >= MEMORY_WATCHER_INITIALIZING) ? dlrealloc
++                                                      : __real_realloc;
++
++  elogf(LOG_LEVEL_DEBUG, "wrapped realloc mem watcher config status:%d \n",
++        memory_watcher_config.status);
++  elogf(
++      LOG_LEVEL_DEBUG,
++      "wrapped realloc \t real_realloc address: %p, dlrealloc %p, selected: %s "
++      "(%p)\n",
++      __real_realloc, dlrealloc,
++      (realloc == __real_realloc) ? "real_realloc" : "dlrealloc", realloc);
++  pointer = (realloc)(p, size);
++  elogf(LOG_LEVEL_DEBUG, "Allocation done at: %p\n", pointer);
++  if (translate_va((u64)pointer) < 0) {
++    elogf(LOG_LEVEL_ERR, "Cannot translate pointer %p\n", pointer);
++    sem_post(&(memory_watcher_config.mutex));
++    return NULL;
++  }
++  if (current_status >= MEMORY_WATCHER_ENABLED) {
++    res = sem_post(&(memory_watcher_config.mutex));
++    if (res < 0) {
++      perror("Cannot post on memory watcher mutex during realloc");
++      return NULL;
++    }
++  }
++  return pointer;
++}
++
++/// The symbol that correspond to the real version of strdup
++extern char *__real_strdup(const char *s);
++
++/// Out version of strdup, so that it can use the memory watcher
++char *__wrap_strdup(const char *s) {
++  int len = strlen(s);
++  char *newstr = __wrap_calloc(len + 1, sizeof(char));
++  if (newstr != NULL) {
++    strcpy(newstr, s);
++  }
++  return newstr;
  }
 \ No newline at end of file
