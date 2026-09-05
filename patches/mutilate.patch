@@ -1,16 +1,38 @@
 diff --git a/SConstruct b/SConstruct
-index 57d0054..9399502 100644
+index 57d0054..6e5bc66 100644
 --- a/SConstruct
 +++ b/SConstruct
-@@ -7,6 +7,7 @@ env = Environment(ENV = os.environ)
+@@ -2,33 +2,48 @@
+ import os
+ import sys
+ 
++target = ARGUMENTS.get('target', 'native')
++
+ env = Environment(ENV = os.environ)
+ 
++
  env['HAVE_POSIX_BARRIER'] = True
  
  env.Append(CPPPATH = ['/usr/local/include', '/opt/local/include'])
++env.Append(LIBPATH= [''])
 +env.Append(LIBPATH= ['/home/mattia/Workspace/memcached-memwatched/lib/'])
++env.Append(LIBPATH= [''])
  env.Append(LIBPATH = ['/opt/local/lib'])
- env.Append(CCFLAGS = '-std=c++11 -D_GNU_SOURCE')
+-env.Append(CCFLAGS = '-std=c++11 -D_GNU_SOURCE')
++env.Append(CCFLAGS = '-static -std=c++11 -D_GNU_SOURCE')
++env.Append(LINKFLAGS = '-static')
  if sys.platform == 'darwin':
-@@ -16,19 +17,19 @@ if sys.platform == 'darwin':
+     env['CC']  = 'clang'
+     env['CXX'] = 'clang++'
+ 
++
++if target !="native":
++        env['CC']=target + 'gcc',
++        env['CXX']=target + 'g++',
++        env['AR']=target + 'ar',
++        env['RANLIB']=target + 'ranlib',
++        env['LINK']=target + 'g++',
++
  conf = env.Configure(config_h = "config.h")
  conf.Define("__STDC_FORMAT_MACROS")
  if not conf.CheckCXX():
@@ -36,7 +58,7 @@ index 57d0054..9399502 100644
      Exit(1)
  conf.CheckLib("rt", "clock_gettime", language="C++")
  conf.CheckLibWithHeader("zmq", "zmq.hpp", "C++")
-@@ -37,8 +38,8 @@ if not conf.CheckFunc('pthread_barrier_init'):
+@@ -37,8 +52,8 @@ if not conf.CheckFunc('pthread_barrier_init'):
  
  env = conf.Finish()
  
@@ -48,20 +70,21 @@ index 57d0054..9399502 100644
  env.Command(['cmdline.cc', 'cmdline.h'], 'cmdline.ggo', 'gengetopt < $SOURCE')
  
 diff --git a/mutilate.cc b/mutilate.cc
-index 426fd05..e9505ec 100644
+index 426fd05..fd67be0 100644
 --- a/mutilate.cc
 +++ b/mutilate.cc
-@@ -979,6 +979,13 @@ void do_mutilate(const vector<string>& servers, options_t& options,
+@@ -979,6 +979,14 @@ void do_mutilate(const vector<string>& servers, options_t& options,
      V("started at %f", get_time());
  
    start = get_time();
 +  if (args.save_given) {
 +    FILE *start_file;
 +    if ((start_file = fopen("mutilate_start.log", "w")) == NULL)
-+      DIE("--save: failed to open %s: %s", args.save_arg, strerror(errno));
-+    fprintf(start_file, "%f\n",start);
++      DIE("failed to open %s: %s", args.save_arg, strerror(errno));
++    fprintf(start_file, "%f\n",boot_time);
 +    fclose(start_file);
 +  }
++
    for (Connection *conn: connections) {
      conn->start_time = start;
      conn->start(); // Kick the Connection into motion.

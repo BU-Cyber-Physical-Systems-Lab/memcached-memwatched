@@ -11,6 +11,8 @@
 #include <time.h>
 #include <unistd.h>
 
+static int verbose=0;
+
 static inline double get_time(void) {
   struct timeval tv;
   gettimeofday(&tv, NULL);
@@ -41,7 +43,7 @@ int main(int argc, char **argv) {
     return -1;
   }
   do {
-    opt = getopt(argc, argv, "-ht:s:d:p:");
+    opt = getopt(argc, argv, "-ht:s:d:p:v");
     switch (opt) {
     case 's':
       char *tmp_signal = NULL;
@@ -210,14 +212,17 @@ int main(int argc, char **argv) {
         perror("Cannot send signal to target process\n");
         return -1;
       }
+      if(verbose>0){
       printf("sent %d to %d. Next period in %lds and %ldns\n",
              signals_to_send[period_id % num_signals_to_send], target,
              period.tv_sec, period.tv_nsec);
+      }
     }
     period_id++;
   } while (recv_sig == SIGRTMAX && (period.tv_sec > 0 || period.tv_nsec > 0));
   timer_delete(period_timer);
   free(signals_to_send);
+  fflush(file);
   fclose(file);
   return 0;
 }

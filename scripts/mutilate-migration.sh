@@ -1,13 +1,4 @@
-#!/usr/bin/env bash
-set -euo pipefail
-declare SCRIPT_DIR
-SCRIPT_DIR="$(
-    cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P
-)"
-declare DATA_DIR
-declare TEST_DIR
-DATA_DIR="$SCRIPT_DIR/../data"
-TEST_DIR="$SCRIPT_DIR/../test"
+#!/bin/bash
 declare dir
 declare server_ip
 declare -i mutilate_runtime
@@ -18,7 +9,7 @@ declare memcached_args
 declare source_location
 declare destination
 declare rest
-declare engine
+declare engine 
 declare mode
 declare -i dst_id
 declare -i dst_modes
@@ -40,87 +31,107 @@ engine=${rest%%-*}
 mode=${rest#*-}
 echo "src:$source_location dst:$destination engine:$engine mode:$mode"
 case "$source_location" in
-DRAM)
-    memcached_args="-w 6M"
-    ;;
-pDRAM)
-    memcached_args="-w 6M:0x60000000"
-    ;;
-BRAM)
-    memcached_args="-w 6M:0xa0000000"
-    ;;
-*)
-    memcached_args="-w 6M"
-    ;;
+	DRAM)
+		memcached_args="-w 6M"
+		;;
+	pDRAM)
+		memcached_args="-w 6M:0x60000000"
+		;;
+	BRAM)
+		memcached_args="-w 6M:0xa0000000"
+		;;
+	*)
+		memcached_args="-w 6M"
+		;;
 esac
-echo "memcached args: $memcached_args"
 case "$destination" in
-overheads)
-    dst_id="0"
-    ;;
-DRAM)
-    dst_id="0"
-    ;;
-pDRAM)
-    dst_id="1"
-    ;;
-BRAM)
-    dst_id="2"
-    ;;
-*)
-    echo "$destination is not a valid destination"
-    exit 1
-    ;;
+	overheads)
+		dst_id="0"
+		;;
+	DRAM)
+		dst_id="0"
+		;;
+	pDRAM)
+		dst_id="1"
+		;;
+	BRAM)
+		dst_id="2"
+		;;
+	baseline|warmup)
+		dst_id="0"
+		;;
+	*)
+		echo "$destination is not a valid destination"
+		exit 1
+		;;
 esac
 case "$mode" in
-overheads)
-    mode_id="0"
-    ;;
-sync)
-    mode_id="1"
-    ;;
-sync_light)
-    mode_id="2"
-    ;;
-sync_no_copy)
-    mode_id="3"
-    ;;
-async)
-    mode_id="4"
-    ;;
-*)
-    echo "$mode is not a valid mode"
-    exit 1
-    ;;
+	baseline|warmup)
+		mode_id="0"
+		;;
+	overheads)
+		mode_id="0"
+		;;
+	sync)
+		mode_id="1"
+		;;
+	sync_light)
+		mode_id="2"
+		;;
+	sync_no_copy)
+		mode_id="3"
+		;;
+	async)
+		mode_id="4"
+		;;
+	*)
+		echo "$mode is not a valid mode"
+		exit 1
+		;;
 esac
-case "$engine" in
-overheads)
-    engine_id="0"
-    dst_modes="0"
-    ;;
-sw)
-    engine_id="0"
-    dst_modes="4" # sw has 4 modes
-    ;;
-locusta)
-    engine_id="12"
-    dst_modes="1" # locusta has only one mode per destination
-    mode_id="0"
-    ;;
-*)
-    echo "$engine is not a valid engine"
-    exit 1
-    ;;
+case "$engine" in 
+	baseline|warmup)
+		engine_id="0"
+		dst_modes="0"
+		;;
+	overheads)
+		engine_id="0"
+		dst_modes="0"
+		;;
+	sw)
+		engine_id="0"
+		dst_modes="4" # sw has 4 modes
+		;;
+	locusta)
+		engine_id="12"
+		dst_modes="1" # locusta has only one mode per destination
+		mode_id="0"
+		;;
+	*)
+		echo "$engine is not a valid engine"
+		exit 1
+		;;
 esac
-signal_id=$(echo "$engine_id + ($dst_id * $dst_modes) + $mode_id" | bc)
-migration_delay=$(echo "$mutilate_init_time + $mutilate_warmup_time + ($mutilate_runtime/2)" | bc)
-kill_delay=$(echo "1+($mutilate_runtime/2)" | bc)
+signal_id=$((engine_id + (dst_id * dst_modes) + mode_id))
+migration_delay=$((mutilate_init_time + mutilate_warmup_time + (mutilate_runtime/2)))
+kill_delay=$((1+(mutilate_runtime/2)))
 migration_args="\"-s $signal_id -d $migration_delay\" $kill_delay"
-echo "migration args: $migration_args"
-mkdir -p "${DATA_DIR}/$dir"
-ssh root@$server_ip "cd memcached && ./start_memcached.sh $memcached_args"
+mkdir -p $dir
+#ssh root@$server_ip "cd memcached; ./start_memcached.sh $memcached_args"
+set -x
+ssh root@$server_ip "./memcached-docker -u root $memcached_args &"
 sleep 1
-"${TEST_DIR}"/mutilate/mutilate -v --save="${DATA_DIR}/${dir}/${dir}.log" -T 16 -w $mutilate_warmup_time --server=$server_ip -t $mutilate_runtime -K fixed:30 -V fixed:200 -i normal:0:1 >"${DATA_DIR}/${dir}/${dir}_stats.txt" &
-ssh root@$server_ip "cd memcached && ./trigger_migration.sh $migration_args"
-mv mutilate_start.log "${DATA_DIR}/$dir/"
-scp root@$server_ip:memcached/interrupts.log "${DATA_DIR}/$dir/migration_interrupts.log"
+../test/mutilate/mutilate -v --save=${dir}/${dir}.log -T 16 -w $mutilate_warmup_time --server=$server_ip -t $mutilate_runtime -K fixed:30 -V fixed:200 -i normal:0:1  > ${dir}/${dir}_stats.txt &
+if [[ "$engine" != "baseline" ]] && [[ "$engine" != "warmup" ]]; then
+    ssh root@$server_ip "cd memcached; ./trigger_migration.sh $migration_args"
+    echo "$migration_delay" > "${dir}"/migration_timestamp.log
+else
+    sleep $((mutilate_runtime + mutilate_init_time + mutilate_warmup_time))
+fi
+mv mutilate_start.log $dir/
+#if [[ "$engine" != "baseline" ]] && [[ "$engine" != "warmup" ]]; then
+#    scp root@$server_ip:memcached/interrupts.log $dir/migration_interrupts.log
+#fi
+if [[ "$engine" == "warmup" ]]; then
+    rm -r warmup
+fi

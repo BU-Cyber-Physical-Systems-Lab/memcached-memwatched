@@ -3,8 +3,8 @@
 # periodic migration
 # @file
 # @version 0.1
-LDFLAGS= -lrt -lm
-CFLAGS= -Og -ggdb -I../../src/locusta_utils/
+LDFLAGS+= -lrt -lm -static
+CFLAGS+= -Og -ggdb -I../../src/locusta_utils/
 .PHONY: all clean
 SHELL:= bash
 .SHELLFLAGS:= -eu -o pipefail -c

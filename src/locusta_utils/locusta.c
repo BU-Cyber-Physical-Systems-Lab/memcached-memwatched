@@ -1,5 +1,6 @@
 #include "locusta.h"
 #include "page_migration_lib.h"
+#include "at_intf_user.h"
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
@@ -64,6 +65,7 @@ static inline int trigger_migration(struct migration_dst dst,
                                     enum migration_mode mode) {
   int dst_id = -1, res;
   size_t migration_size = 0;
+  union at_response response={0};
   if (migration_source == NULL) {
     fprintf(stderr, "ERROR: Migration source is NULL!\n");
     return -1;
@@ -80,7 +82,15 @@ static inline int trigger_migration(struct migration_dst dst,
   } else {
     migration_size = heap_size_pages - 1;
   }
-  if (verbose > 1) {
+  if(verbose>0){
+    at_intf_translate((uint64_t) migration_source, 0, &response);
+    if(response.success.f==0){
+      printf("DEBUG: PA PFN before migration: 0x%lx\n",response.success.pa_pfn);
+    }else{
+      printf("WARNING: Migration check failed!\n");
+    }
+  }
+  if (verbose > 0) {
     printf(
         "DEBUG: heap size %lu destination size %lu chosen migration size %lu\n",
         heap_size_pages, dst.size / getpagesize(), migration_size);
@@ -90,6 +100,14 @@ static inline int trigger_migration(struct migration_dst dst,
   }
   res = migrate_pages_to_dst(migration_source, migration_size, engine, dst_id,
                              mode);
+  if(verbose>0){
+    at_intf_translate((uint64_t) migration_source, 0, &response);
+    if(response.success.f==0){
+      printf("DEBUG: PA PFN after migration: 0x%lx\n",response.success.pa_pfn);
+    }else{
+      printf("WARNING: Migration check failed!\n");
+    }
+  }
   if (res < 0) {
     fprintf(stderr, "ERROR: Migration failed!\n");
   }
@@ -124,12 +142,12 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
             heap_size_pages);
     return;
   }
-  if (verbose > 1) {
+  if (verbose > 0) {
     printf("DEBUG: signal offset is %d\n", signal_offset);
   }
   // 0 to DUMMY_SIGNALS -1 -> we fake the migration
   if (signal_offset < DUMMY_SIGNALS) {
-    if (verbose > 1) {
+    if (verbose > 0) {
       printf("DEBUG: selected DUMMY handler\n");
     }
     return;
@@ -143,25 +161,25 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
       engine = MIGRATION_ENGINE_SW;
       switch (signal_offset % selected_modes) {
       case 0:
-        if (verbose > 1) {
+        if (verbose > 0) {
           printf("DEBUG: selected SW SYNC migration\n");
         }
         mode = MIGRATION_MODE_SYNC;
         break;
       case 1:
-        if (verbose > 1) {
+        if (verbose > 0) {
           printf("DEBUG: selected SW SYNC LIGHT migration\n");
         }
         mode = MIGRATION_MODE_SYNC_LIGHT;
         break;
       case 2:
-        if (verbose > 1) {
+        if (verbose > 0) {
           printf("DEBUG: selected SW SYNC NO COPY migration\n");
         }
         mode = MIGRATION_MODE_SYNC_NO_COPY;
         break;
       case 3:
-        if (verbose > 1) {
+        if (verbose > 0) {
           printf("DEBUG: selected SW ASYNC migration\n");
         }
         mode = MIGRATION_MODE_ASYNC;
@@ -182,7 +200,7 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
         engine = MIGRATION_ENGINE_LOCUSTA;
         switch (signal_offset % selected_modes) {
         case 0:
-          if (verbose > 1) {
+          if (verbose > 0) {
             printf("DEBUG: selected HW ASYNC migration\n");
           }
           mode = MIGRATION_MODE_ASYNC;

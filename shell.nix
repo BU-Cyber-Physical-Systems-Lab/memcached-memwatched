@@ -19,6 +19,7 @@ mkShell {
     pkgs.zeromq
     pkgs.git
     pkgs.python3
+    pkgs.python3Packages.numpy
     pkgs.python3Packages.pandas
     pkgs.python3Packages.seaborn
     pkgs.python3Packages.matplotlib
