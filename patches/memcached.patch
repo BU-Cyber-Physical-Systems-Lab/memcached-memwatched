@@ -41,7 +41,7 @@ index a7a11ad..3810323 100644
  memcached_debug_DEPENDENCIES =
  CLEANFILES=
 diff --git a/memcached.c b/memcached.c
-index 8611661..d833f85 100644
+index 8611661..bc2aa28 100644
 --- a/memcached.c
 +++ b/memcached.c
 @@ -61,6 +61,9 @@
@@ -470,18 +470,20 @@ index 8611661..d833f85 100644
                  exit(EXIT_FAILURE);
                  break;
              case AUTHFILE_OK:
-@@ -5978,6 +6183,10 @@ int main (int argc, char **argv) {
+@@ -5978,6 +6183,12 @@ int main (int argc, char **argv) {
          meta->mmap_base = mem_base;
          // Also, the callbacks for load() run before _open returns, so we
          // should have the old base in 'meta' as of here.
 +      setup_migration(mem_base,0, settings.maxbytes/getpagesize(),settings.verbose);
++      mlockall(MCL_CURRENT | MCL_FUTURE);
++      memset(mem_base,0,settings.maxbytes);
 +      if(settings.verbose>0){
 +        printf("Memory file and migration handlers are ready\n");
 +      }
      }
      // Initialize the hash table _after_ checking restart metadata.
      // We override the hash table start argument with what was live
-@@ -6029,6 +6238,12 @@ int main (int argc, char **argv) {
+@@ -6029,6 +6240,12 @@ int main (int argc, char **argv) {
       */
      if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
          perror("failed to ignore SIGPIPE; sigaction");
@@ -494,7 +496,7 @@ index 8611661..d833f85 100644
          exit(EX_OSERR);
      }
      /* start up worker threads if MT mode */
-@@ -6048,25 +6263,55 @@ int main (int argc, char **argv) {
+@@ -6048,25 +6265,55 @@ int main (int argc, char **argv) {
  #ifdef PROXY
      if (settings.proxy_enabled) {
          if (proxy_first_confload(settings.proxy_ctx) != 0) {
@@ -550,7 +552,7 @@ index 8611661..d833f85 100644
          exit(EXIT_FAILURE);
      }
  
-@@ -6082,11 +6327,23 @@ int main (int argc, char **argv) {
+@@ -6082,11 +6329,23 @@ int main (int argc, char **argv) {
      if (settings.slab_reassign) {
          settings.slab_rebal = start_slab_maintenance_thread(storage);
          if (!settings.slab_rebal) {
@@ -574,7 +576,7 @@ index 8611661..d833f85 100644
          exit(EXIT_FAILURE);
      }
  
-@@ -6117,6 +6374,12 @@ int main (int argc, char **argv) {
+@@ -6117,6 +6376,12 @@ int main (int argc, char **argv) {
          errno = 0;
          if (server_socket_unix(settings.socketpath,settings.access)) {
              vperror("failed to listen on UNIX socket: %s", settings.socketpath);
@@ -587,7 +589,7 @@ index 8611661..d833f85 100644
              exit(EX_OSERR);
          }
      }
-@@ -6133,6 +6396,12 @@ int main (int argc, char **argv) {
+@@ -6133,6 +6398,12 @@ int main (int argc, char **argv) {
              temp_portnumber_filename = malloc(len);
              if (temp_portnumber_filename == NULL) {
                  vperror("Failed to allocate memory for portnumber file");
@@ -600,7 +602,7 @@ index 8611661..d833f85 100644
                  exit(EX_OSERR);
              }
              snprintf(temp_portnumber_filename,
-@@ -6155,6 +6424,12 @@ int main (int argc, char **argv) {
+@@ -6155,6 +6426,12 @@ int main (int argc, char **argv) {
                  vperror("failed to listen on one of interface(s) %s", settings.inter);
              }
              free(temp_portnumber_filename);
@@ -613,7 +615,7 @@ index 8611661..d833f85 100644
              exit(EX_OSERR);
          }
  
-@@ -6175,6 +6450,12 @@ int main (int argc, char **argv) {
+@@ -6175,6 +6452,12 @@ int main (int argc, char **argv) {
                  vperror("failed to listen on one of interface(s) %s", settings.inter);
              }
              free(temp_portnumber_filename);
@@ -626,7 +628,7 @@ index 8611661..d833f85 100644
              exit(EX_OSERR);
          }
  
-@@ -6192,6 +6473,12 @@ int main (int argc, char **argv) {
+@@ -6192,6 +6475,12 @@ int main (int argc, char **argv) {
      usleep(1000);
      if (stats_state.curr_conns + stats_state.reserved_fds >= settings.maxconns - 1) {
          fprintf(stderr, "Maxconns setting is too low, use -c to increase.\n");
@@ -639,7 +641,7 @@ index 8611661..d833f85 100644
          exit(EXIT_FAILURE);
      }
  
-@@ -6249,6 +6536,12 @@ int main (int argc, char **argv) {
+@@ -6249,6 +6538,12 @@ int main (int argc, char **argv) {
  
      /* cleanup base */
      event_base_free(main_base);

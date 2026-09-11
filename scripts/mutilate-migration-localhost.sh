@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# $1: name of experiment
+# $2: subfolder of the experiment (optional)
+#
 declare dir
 declare server_ip
 declare mutilate_runtime
@@ -22,18 +25,31 @@ declare migration_period
 declare -i migration_pid
 declare -i memcached_pid
 declare experiment
+declare ramdisk_path
+declare ramdisk_file
+declare script_dir
+
+script_dir="$(
+  cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1
+  pwd -P
+)"
+ramdisk_path=/tmp/memcached_ramdisk
 experiment=$1
-dir=data/$experiment
+dir="$script_dir"/data/$2/$experiment
 server_ip=127.0.0.1
 mutilate_runtime=5
 mutilate_warmup_time=2
-mutilate_init_time=1
+mutilate_init_time=0
 source_location=${experiment%%2*}
 rest=${experiment#*2}
 destination=${rest%%-*}
 rest=${rest#*-}
 engine=${rest%%-*}
 mode=${rest#*-}
+
+touch "$ramdisk_path"
+truncate -s 41M "$ramdisk_path"
+
 echo "src:$source_location dst:$destination engine:$engine mode:$mode"
 case "$source_location" in
     baseline_nomw)
@@ -41,23 +57,23 @@ case "$source_location" in
         src_id=0
 		;;
     baseline)
-		memcached_args="-w 6M -m 6"
+		memcached_args="--memory-file=$ramdisk_file -m 40"
         src_id=0
 		;;
 	DRAM)
-		memcached_args="-w 6M -m 6"
+		memcached_args="--memory-file=$ramdisk_file -m 40"
         src_id=0
 		;;
 	pDRAM)
-		memcached_args="-w 6M:0x60000000 -m 6"
+		memcached_args="--memory-file=$ramdisk_file:0x60000000 -m 40"
         src_id=1
 		;;
 	BRAM)
-		memcached_args="-w 6M:0xa0000000 -m 6"
+		memcached_args="--memory-file=$ramdisk_file:0xa0000000 -m 40"
         src_id=2
 		;;
 	*)
-		memcached_args="-w 6M -m 6"
+		memcached_args="--memory-file=$ramdisk_file -m 40"
         src_id=0
 		;;
 esac
@@ -135,18 +151,26 @@ migration_period=$(echo  "$mutilate_runtime/5" | bc)
 migration_delay=$(echo "$mutilate_init_time + $mutilate_warmup_time + $migration_period" | bc)
 mkdir -p "$dir"
 echo "Chosen migration signal dst:$dst_signal_id src:$src_signal_id"
-./memcached -t 3 -u root "$memcached_args" &
-memcached_pid=$!
-../busybox-armv8l taskset -p 0xe $memcached_pid
+/usr/bin/time -v ./memcached -v -t 1 -u root -c 32768 $memcached_args &
+memcached_pid=$(pidof memcached)
+../busybox-armv8l taskset -p 0x8 $memcached_pid
 sleep 1
-./mutilate --save="${dir}/${experiment}.log" -T 16 -w $mutilate_warmup_time --server=$server_ip -t $mutilate_runtime > "${dir}/${experiment}_stats.txt" &
+#load mutilate DB
+"$script_dir"/mutilate -v --loadonly --server=$server_ip
+# start issuing requests using background agents
+"$script_dir"/mutilate -v --server=$server_ip --noload \
+    -B -T 16 \
+    -c 4 \
+    --save="${dir}/${experiment}.log" \
+    -w $mutilate_warmup_time -t $mutilate_runtime > "${dir}/${experiment}_stats.txt" &
 mutilate_pid=$!
-../busybox-armv8l taskset -p 0x1 $mutilate_pid
+
 if [[ ! "$engine" =~ ^baseline ]] && [[ "$engine" != "warmup" ]]; then
-    ./periodic_migration -s "$dst_signal_id,$src_signal_id" -d "$migration_delay" -t $memcached_pid -p "$migration_period" &
-    migration_pid=$!
-    ../busybox-armv8l taskset -p 0x1 $migration_pid
-    wait -f $mutilate_pid
+    "$script_dir"/periodic_migration -s "$dst_signal_id,$src_signal_id" -d "$migration_delay" -t $memcached_pid -p "$migration_period" &
+    migration_pid=$(pidof periodic_migration)
+    ../busybox-armv8l taskset -p 0x7 $migration_pid
+    wait -f "$mutilate_pid"
+    killall mutilate
     kill -INT "$migration_pid"
     wait -f "$migration_pid"
 else
@@ -161,4 +185,4 @@ fi
 if [[ "$engine" == "warmup" ]]; then
     rm -r "$dir"
 fi
-wait -f "$memcached_pid"
+rm -r "$ramdisk_path"

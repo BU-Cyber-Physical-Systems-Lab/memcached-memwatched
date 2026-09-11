@@ -1,47 +1,111 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# $1: name of experiment
+# $2: subfolder of the experiment (optional)
+
+declare script_dir
+declare dir
+declare server_ip
+declare mutilate_runtime
+declare mutilate_warmup_time
+declare mutilate_init_time
+declare memcached_args
+declare mutilate_args
+declare source_location
+declare destination
+declare rest
+declare engine
+declare mode
+declare -i dst_id
+declare -i src_id
+declare -i dst_modes
+declare -i mode_id
+declare -i engine_id
+declare -i src_signal_id
+declare -i dst_signal_id
+declare migration_delay
+declare migration_period
+declare -i migration_pid
+declare -i memcached_pid
+declare experiment
+declare ramdisk_path
 declare dir
 declare server_ip
 declare -i mutilate_runtime
 declare -i mutilate_warmup_time
 declare -i mutilate_init_time
-declare migration_args
 declare memcached_args
 declare source_location
 declare destination
 declare rest
-declare engine 
+declare engine
 declare mode
 declare -i dst_id
 declare -i dst_modes
 declare -i mode_id
 declare -i engine_id
-declare -i signal_id
 declare -i migration_delay
-declare -i kill_delay
-dir=$1
+declare -ia mutilate_agents_pids
+declare mutilate_agents_ip
+declare -i mutilate_agents_start_port
+declare -i mutilate_num_agents
+
+
+script_dir="$(
+  cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1
+  pwd -P
+)"
+
+mutilate_agents_pids=()
+mutilate_num_agents=0
+mutilate_max_threads=16
+mutilate_agents_start_port=5556
+mutilate_agents_ip="127.0.0.1"
+ramdisk_path=/tmp/memcached_ramdisk
+experiment=$1
+dir="$script_dir"/../data/$2/$experiment
 server_ip=10.210.1.187
 mutilate_runtime=5
-mutilate_warmup_time=1
-mutilate_init_time=3
-source_location=${dir%%2*}
-rest=${dir#*2}
+mutilate_warmup_time=2
+mutilate_init_time=0
+source_location=${experiment%%2*}
+rest=${experiment#*2}
 destination=${rest%%-*}
 rest=${rest#*-}
 engine=${rest%%-*}
 mode=${rest#*-}
+mutilate_pwd="$script_dir/../test/mutilate/mutilate"
+mutilate_output_file="$dir/$experiment.log"
+mutilate_stats_file="$dir/${experiment}_stats.txt"
+mutilate_num_agents=$(echo "$(nproc) / $mutilate_max_threads" | bc)
+
+
+ssh "root@$server_ip" "touch $ramdisk_path && truncate -s 41M $ramdisk_path"
+
 echo "src:$source_location dst:$destination engine:$engine mode:$mode"
 case "$source_location" in
+    baseline_nomw)
+		memcached_args=""
+        src_id=0
+		;;
+    baseline)
+		memcached_args="--memory-file=$ramdisk_path -m 40"
+        src_id=0
+		;;
 	DRAM)
-		memcached_args="-w 6M"
+		memcached_args="--memory-file=$ramdisk_path -m 40"
+        src_id=0
 		;;
 	pDRAM)
-		memcached_args="-w 6M:0x60000000"
+		memcached_args="--memory-file=$ramdisk_path:0x60000000 -m 40"
+        src_id=1
 		;;
 	BRAM)
-		memcached_args="-w 6M:0xa0000000"
+		memcached_args="--memory-file=$ramdisk_path:0xa0000000 -m 40"
+        src_id=2
 		;;
 	*)
-		memcached_args="-w 6M"
+		memcached_args="--memory-file=$ramdisk_path -m 40"
+        src_id=0
 		;;
 esac
 case "$destination" in
@@ -57,7 +121,7 @@ case "$destination" in
 	BRAM)
 		dst_id="2"
 		;;
-	baseline|warmup)
+	baseline*|warmup)
 		dst_id="0"
 		;;
 	*)
@@ -66,7 +130,7 @@ case "$destination" in
 		;;
 esac
 case "$mode" in
-	baseline|warmup)
+	baseline*|warmup)
 		mode_id="0"
 		;;
 	overheads)
@@ -89,8 +153,8 @@ case "$mode" in
 		exit 1
 		;;
 esac
-case "$engine" in 
-	baseline|warmup)
+case "$engine" in
+	baseline*|warmup)
 		engine_id="0"
 		dst_modes="0"
 		;;
@@ -112,26 +176,61 @@ case "$engine" in
 		exit 1
 		;;
 esac
-signal_id=$((engine_id + (dst_id * dst_modes) + mode_id))
-migration_delay=$((mutilate_init_time + mutilate_warmup_time + (mutilate_runtime/2)))
-kill_delay=$((1+(mutilate_runtime/2)))
-migration_args="\"-s $signal_id -d $migration_delay\" $kill_delay"
-mkdir -p $dir
-#ssh root@$server_ip "cd memcached; ./start_memcached.sh $memcached_args"
-set -x
-ssh root@$server_ip "./memcached-docker -u root $memcached_args &"
+dst_signal_id=$(echo "$engine_id + ($dst_id * $dst_modes) + $mode_id" | bc)
+src_signal_id=$(echo "$engine_id + ($src_id * $dst_modes) + $mode_id" | bc)
+migration_period=$(echo  "$mutilate_runtime/5" | bc)
+migration_delay=$(echo "$mutilate_init_time + $mutilate_warmup_time + $migration_period+1" | bc)
+mkdir -p "$dir"
+echo "Chosen migration signal dst:$dst_signal_id src:$src_signal_id"
+ssh root@$server_ip ./memcached-nix/memcached -t 3 -u root $memcached_args &
+memcached_job=$!
 sleep 1
-../test/mutilate/mutilate -v --save=${dir}/${dir}.log -T 16 -w $mutilate_warmup_time --server=$server_ip -t $mutilate_runtime -K fixed:30 -V fixed:200 -i normal:0:1  > ${dir}/${dir}_stats.txt &
-if [[ "$engine" != "baseline" ]] && [[ "$engine" != "warmup" ]]; then
-    ssh root@$server_ip "cd memcached; ./trigger_migration.sh $migration_args"
-    echo "$migration_delay" > "${dir}"/migration_timestamp.log
+server_memcached_pid=$(ssh root@$server_ip pidof memcached)
+ssh root@$server_ip ./busybox-armv8l taskset -p 0xe "$server_memcached_pid"
+# start mutilate agents
+echo "Starting agents"
+for (( i=0 ; i < mutilate_num_agents ; i++ )); do
+    $mutilate_pwd -T "$mutilate_max_threads" -c 4 -q 200000 -A -p "$(( mutilate_agents_start_port + i ))" &
+    mutilate_agents_pids+=($!)
+    mutilate_args="$mutilate_args -a $mutilate_agents_ip:$(( mutilate_agents_start_port + i ))"
+done
+echo "agents started, loading DB"
+# load db
+$mutilate_pwd --loadonly --server=$server_ip
+# start mutilate master, connect to agents and start issuing requests
+echo "DB loaded, starting experiment"
+if [[ ! "$engine" =~ ^baseline ]] && [[ "$engine" != "warmup" ]]; then
+    ssh root@$server_ip ./memcached-nix/periodic_migration -v \
+        -s "$dst_signal_id,$src_signal_id" -d "$migration_delay" \
+        -t "$server_memcached_pid" -p "$migration_period" &
+    migration_job=$!
+    server_migration_pid=$(ssh root@$server_ip pidof periodic_migration)
+    ssh root@$server_ip ./busybox-armv8l taskset -p 0x1 "$server_migration_pid"
+fi
+ssh root@$server_ip "./memcached-nix/dump_time"
+$mutilate_pwd --noload --save="$mutilate_output_file" \
+    -w "$mutilate_warmup_time" --server="$server_ip" \
+    -t "$mutilate_runtime" -T "$mutilate_max_threads" \
+    -B -R -D 4 -C 4 -c 4 -Q 1000 $mutilate_args \
+    > "$mutilate_stats_file" &
+mutilate_job=$!
+if [[ ! "$engine" =~ ^baseline ]] && [[ "$engine" != "warmup" ]]; then
+    wait -f $mutilate_job
+    ssh root@$server_ip killall -INT periodic_migration
+    killall mutilate
+    wait -f "$migration_job"
 else
-    sleep $((mutilate_runtime + mutilate_init_time + mutilate_warmup_time))
+    wait -f "$mutilate_job"
 fi
-mv mutilate_start.log $dir/
-#if [[ "$engine" != "baseline" ]] && [[ "$engine" != "warmup" ]]; then
-#    scp root@$server_ip:memcached/interrupts.log $dir/migration_interrupts.log
-#fi
+sleep 1
+ssh root@$server_ip kill -INT "$server_memcached_pid"
+wait -f "$memcached_job"
+ssh root@$server_ip sync
+scp root@$server_ip:mutilate_start.log "$dir/"
+if [[ ! "$engine" =~ ^baseline ]] && [[ "$engine" != "warmup" ]]; then
+   scp root@$server_ip:interrupts.log "$dir/migration_timestamp.log"
+fi
 if [[ "$engine" == "warmup" ]]; then
-    rm -r warmup
+    rm -r "$dir"
 fi
+ssh root@$server_ip rm "$ramdisk_path"

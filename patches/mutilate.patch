@@ -1,12 +1,13 @@
 diff --git a/SConstruct b/SConstruct
-index 57d0054..6e5bc66 100644
+index 57d0054..71fec7d 100644
 --- a/SConstruct
 +++ b/SConstruct
-@@ -2,33 +2,48 @@
+@@ -2,33 +2,50 @@
  import os
  import sys
  
 +target = ARGUMENTS.get('target', 'native')
++linkflags = ARGUMENTS.get('linkflags', '')
 +
  env = Environment(ENV = os.environ)
  
@@ -18,13 +19,13 @@ index 57d0054..6e5bc66 100644
 +env.Append(LIBPATH= ['/home/mattia/Workspace/memcached-memwatched/lib/'])
 +env.Append(LIBPATH= [''])
  env.Append(LIBPATH = ['/opt/local/lib'])
--env.Append(CCFLAGS = '-std=c++11 -D_GNU_SOURCE')
-+env.Append(CCFLAGS = '-static -std=c++11 -D_GNU_SOURCE')
-+env.Append(LINKFLAGS = '-static')
+ env.Append(CCFLAGS = '-std=c++11 -D_GNU_SOURCE')
++
  if sys.platform == 'darwin':
      env['CC']  = 'clang'
      env['CXX'] = 'clang++'
- 
++if linkflags !='':
++    env.Append(LINKFLAGS = linkflags.strip().split())
 +
 +if target !="native":
 +        env['CC']=target + 'gcc',
@@ -32,7 +33,7 @@ index 57d0054..6e5bc66 100644
 +        env['AR']=target + 'ar',
 +        env['RANLIB']=target + 'ranlib',
 +        env['LINK']=target + 'g++',
-+
+ 
  conf = env.Configure(config_h = "config.h")
  conf.Define("__STDC_FORMAT_MACROS")
  if not conf.CheckCXX():
@@ -58,7 +59,7 @@ index 57d0054..6e5bc66 100644
      Exit(1)
  conf.CheckLib("rt", "clock_gettime", language="C++")
  conf.CheckLibWithHeader("zmq", "zmq.hpp", "C++")
-@@ -37,8 +52,8 @@ if not conf.CheckFunc('pthread_barrier_init'):
+@@ -37,8 +54,8 @@ if not conf.CheckFunc('pthread_barrier_init'):
  
  env = conf.Finish()
  
@@ -70,9 +71,20 @@ index 57d0054..6e5bc66 100644
  env.Command(['cmdline.cc', 'cmdline.h'], 'cmdline.ggo', 'gengetopt < $SOURCE')
  
 diff --git a/mutilate.cc b/mutilate.cc
-index 426fd05..fd67be0 100644
+index 426fd05..132fc8f 100644
 --- a/mutilate.cc
 +++ b/mutilate.cc
+@@ -146,8 +146,8 @@ static bool s_send (zmq::socket_t &socket, const std::string &string) {
+  * [IF WARMUP]  0:  Everyone: RUN for options.warmup seconds.
+  * 1. Master <-> Agent: Synchronize
+  * 2. Everyone: RUN for options.time seconds.
+- * 3. Master -> Agent: Dummy message
+- * 4. Agent -> Master: Send AgentStats [w/ RX/TX bytes, # gets/sets]
++ * 3. Master -> Agent: Dummy m(essage
++   .override {static=true;})* 4. Agent -> Master: Send AgentStats [w/ RX/TX bytes, # gets/sets]
+  *
+  * The master then aggregates AgentStats across all agents with its
+  * own ConnectionStats to compute overall statistics.
 @@ -979,6 +979,14 @@ void do_mutilate(const vector<string>& servers, options_t& options,
      V("started at %f", get_time());
  
@@ -88,3 +100,16 @@ index 426fd05..fd67be0 100644
    for (Connection *conn: connections) {
      conn->start_time = start;
      conn->start(); // Kick the Connection into motion.
+@@ -1056,7 +1064,11 @@ void args_to_options(options_t* options) {
+   //  if (args.no_record_scale_given)
+   //    options->records = args.records_arg;
+   //  else
+-  options->records = args.records_arg / options->server_given;
++  if (options->server_given) {
++    options->records = args.records_arg / options->server_given;
++  } else {
++    options->records=0;
++  }
+ 
+   options->binary = args.binary_given;
+   options->sasl = args.username_given;

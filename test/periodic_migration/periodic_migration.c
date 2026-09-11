@@ -45,6 +45,9 @@ int main(int argc, char **argv) {
   do {
     opt = getopt(argc, argv, "-ht:s:d:p:v");
     switch (opt) {
+    case 'v':
+      verbose++;
+      break;
     case 's':
       char *tmp_signal = NULL;
       int signal_to_send = 0;
@@ -193,6 +196,16 @@ int main(int argc, char **argv) {
     fclose(file);
     free(signals_to_send);
     return res;
+  }
+  if (verbose > 0) {
+    printf("Delay %lds and %ldns and target %d period %lds and %ldns\n",
+           initial_delay.tv_sec, initial_delay.tv_nsec, target, period.tv_sec,
+           period.tv_nsec);
+    printf("Signals to send:");
+    for (int i = 0; i < num_signals_to_send;i++) {
+      printf(" %d",signals_to_send[i]);
+    }
+    printf("\n");
   }
   do {
     if (initial_delay.tv_sec > 0 || initial_delay.tv_nsec > 0) {
