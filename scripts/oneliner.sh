@@ -18,6 +18,6 @@ for experiment in "${experiments[@]}"; do
     bash "$script_dir/mutilate-migration.sh" "$experiment" "$1"
     sleep 1
 done
-if [[ -f plots.py ]]; then
-    python3 plots.py "$1"
+if [[ -f $script_dir/plots.py ]]; then
+    python3 $script_dir/plots.py "$1"
 fi
