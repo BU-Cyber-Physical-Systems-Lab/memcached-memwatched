@@ -4,13 +4,13 @@
 
 int main(int argc, char **argv) {
   char *filename = "mutilate_start.log";
-  if (argc > 1) {
+  if (argc > 2) {
     fprintf(stderr, "Wrong number of argument supplied!\n");
     fprintf(stderr, "Usage: dump_time [path to output file]\n");
     return -1;
   }
-  if (argc == 1) {
-    filename = argv[0];
+  if (argc == 2) {
+    filename = argv[1];
   }
   struct timeval tv;
   gettimeofday(&tv, NULL);

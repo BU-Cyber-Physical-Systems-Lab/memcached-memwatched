@@ -40,6 +40,8 @@ declare source_location
 declare destination
 declare rest
 declare engine
+declare nfs_data_dir
+declare nfs_exec_dir
 declare mode
 declare -i dst_id
 declare -i dst_modes
@@ -74,6 +76,8 @@ mutilate_agents_start_port=5556
 mutilate_agents_ip="127.0.0.1"
 ramdisk_path=/tmp/memcached_ramdisk
 experiment=$1
+nfs_data_dir=/data/$2/$experiment
+nfs_exec_dir=/Locusta/memcached
 mem_file_size=64
 dir=/nfsroot/fciraolo/data/$3/$2/$experiment
 mutilate_runtime=5
@@ -198,11 +202,11 @@ mkdir -p "$dir"
 fi
 echo "Chosen migration signal dst:$dst_signal_id src:$src_signal_id"
 #shellcheck disable=SC2086
-ssh "$ssh_target" ./memcached-nix/memcached -t 3 -u root $memcached_args &
+ssh "$ssh_target" "$nfs_exec_dir"/memcached -t 3 -u root $memcached_args &
 memcached_job=$!
 sleep 1
 server_memcached_pid=$(ssh "$ssh_target" pidof memcached)
-ssh "$ssh_target" ./busybox-armv8l taskset -p 0xe "$server_memcached_pid"
+#ssh "$ssh_target" "$nfs_exec_dir"/busybox-armv8l taskset -p 0xe "$server_memcached_pid"
 # start mutilate agents
 if [[ $mutilate_num_agents -gt 0 ]]; then
 echo "Starting agents"
@@ -222,19 +226,20 @@ $mutilate_pwd --loadonly --server="$server_ip"
 # start mutilate master, connect to agents and start issuing requests
 echo "DB loaded, starting experiment"
 if [[ ! "$engine" =~ ^baseline ]] && [[ "$engine" != "warmup" ]]; then
-    ssh "$ssh_target" ./memcached-nix/periodic_migration \
+    ssh "$ssh_target" "$nfs_exec_dir"/periodic_migration \
         -s "$dst_signal_id,$src_signal_id" -d "$migration_delay" \
-        -t "$server_memcached_pid" -p "$migration_period" &
+        -t "$server_memcached_pid" -p "$migration_period" -f "$nfs_data_dir/migration_timestamp.log" &
     migration_job=$!
-    server_migration_pid=$(ssh "$ssh_target" pidof periodic_migration)
-    ssh "$ssh_target" ./busybox-armv8l taskset -p 0x1 "$server_migration_pid" -f "/data/$experiment/migration_timestamp.log"
+    #server_migration_pid=$(ssh "$ssh_target" pidof periodic_migration)
+    #ssh "$ssh_target" "$nfs_exec_dir"/busybox-armv8l taskset -p 0x1 "$server_migration_pid"
 fi
-ssh "$ssh_target" "./memcached-nix/dump_time" "/data/$experiment/mutilate_start.log"
+# NOTE: These arguments have to be fine-tuned depending on the server
 mutilate_args="$mutilate_args --noload -w $mutilate_warmup_time --server=$server_ip -t $mutilate_runtime -T $mutilate_master_threads -d 4 -c 4 -q 200000 -i fb_ia  -K fb_key -V fb_value -r 10000 -u 0"
 if [[ "$engine" == "warmup" ]]; then
 #shellcheck disable=SC2086
 $mutilate_pwd $mutilate_args > "/dev/null" &
 else
+ssh "$ssh_target" "$nfs_exec_dir"/dump_time "$nfs_data_dir/mutilate_start.log"
 #shellcheck disable=SC2086
 $mutilate_pwd --save="$mutilate_output_file" $mutilate_args > "$mutilate_stats_file" &
 fi

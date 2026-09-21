@@ -5,7 +5,7 @@
 # @version 0.1
 SHELL:= bash
 .SHELLFLAGS:= -eu -o pipefail -c
-.PHONY: memcached mutilate test clean setup all clean-rt-bench clean-memcached clean-mutilate server clean-server clean-migration
+.PHONY: memcached mutilate test periodic_migration dump_time server nfs clean setup all clean-rt-bench clean-memcached clean-mutilate clean-server clean-migration
 
 BASE_FLDR=$(abspath $(lastword $(dir $(MAKEFILE_LIST))))
 PATCH_FLDR=$(BASE_FLDR)/patches
@@ -21,7 +21,7 @@ CONFIGURE_OPTS?=
 SERVER?=
 CLIENT?=
 LDFLAGS+=-static
-SCONS_OPTS=linkflags=$(LDFLAGS)
+SCONS_OPTS=linkflags="$(LDFLAGS)"
 NFS_TARGET_FLDR?=/nfsroot/fciraolo/Locusta/memcached/
 ifdef CROSS_COMPILE
 LDFLAGS+=-lc
@@ -29,21 +29,20 @@ CONFIGURE_OPTS+=--host=$(CROSS_COMPILE:-=)
 SCONS_OPTS+=target=$(CROSS_COMPILE)
 endif
 
-all: $(MEMCACHED_SRC_FLDR)/memcached $(MUTILATE_SRC_FLDR)/mutilate $(MIGRATION_SRC_FLDR)/periodic_migration server client
+all: memcached mutilate test
 setup: $(MEMCACHED_SRC_FLDR)/README.md src/rt-bench/README.md $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(MUTILATE_SRC_FLDR)/README.md
-
-memcached: $(MEMCACHED_SRC_FLDR)/memcached
-mutilate: $(MUTILATE_SRC_FLDR)/mutilate
-test: mutilate $(MIGRATION_SRC_FLDR)/periodic_migration $(DUMP_TIME_SRC_FLDR)/dump_time
+test: mutilate periodic_migration dump_time
 
 $(MEMCACHED_SRC_FLDR)/README.md:
 	@git submodule update --init $(MEMCACHED_SRC_FLDR)
+	git -C $(RTBENCH_SRC_FLDR) apply $(PATCH_FLDR)/rt-bench.patch
 
 src/rt-bench/README.md:
 	@git submodule update --init src/rt-bench
 
 $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c: src/rt-bench/README.md
 	@git -C $(RTBENCH_SRC_FLDR) submodule update --init dlmalloc
+	git -C $(RTBENCH_SRC_FLDR)/dlmalloc apply ../dlmalloc.patch
 
 $(MEMCACHED_SRC_FLDR)/configure:
 	cd $(MEMCACHED_SRC_FLDR) && ./autogen.sh
@@ -51,26 +50,24 @@ $(MEMCACHED_SRC_FLDR)/configure:
 $(MEMCACHED_SRC_FLDR)/Makefile: $(MEMCACHED_SRC_FLDR)/README.md $(MEMCACHED_SRC_FLDR)/configure
 	cd $(MEMCACHED_SRC_FLDR) &&  LDFLAGS="$(LDFLAGS)" ./configure $(CONFIGURE_OPTS)
 
-$(MEMCACHED_SRC_FLDR)/memcached: $(MEMCACHED_SRC_FLDR)/Makefile $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c
-	-git -C $(RTBENCH_SRC_FLDR) apply $(PATCH_FLDR)/rt-bench.patch
-	-git -C $(RTBENCH_SRC_FLDR)/dlmalloc apply ../dlmalloc.patch
+memcached: $(MEMCACHED_SRC_FLDR)/Makefile $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c
 	-git -C $(MEMCACHED_SRC_FLDR) apply $(PATCH_FLDR)/memcached.patch
 	$(MAKE) -C $(MEMCACHED_SRC_FLDR)
 
 $(MUTILATE_SRC_FLDR)/README.md:
 	@git submodule update --init $(MUTILATE_SRC_FLDR)
 
-$(MUTILATE_SRC_FLDR)/mutilate: $(MUTILATE_SRC_FLDR)/README.md
+mutilate: $(MUTILATE_SRC_FLDR)/README.md
 	-git -C $(MUTILATE_SRC_FLDR) apply $(PATCH_FLDR)/$(MUTILATE_PATCH)
 	scons -C $(MUTILATE_SRC_FLDR) $(SCONS_OPTS)
 ifdef CROSS_COMPILE
 	mv $(MUTILATE_SRC_FLDR)/mutilate $(MUTILATE_SRC_FLDR)/mutilate-cross
 endif
 
-$(MIGRATION_SRC_FLDR)/periodic_migration:
+periodic_migration:
 	$(MAKE) -C $(MIGRATION_SRC_FLDR)
 
-$(DUMP_TIME_SRC_FLDR)/dump_time:
+dump_time:
 	$(MAKE) -C $(DUMP_TIME_SRC_FLDR)
 
 server: $(DUMP_TIME_SRC_FLDR)/dump_time $(MIGRATION_SRC_FLDR)/periodic_migration $(MUTILATE_SRC_FLDR)/mutilate $(MEMCACHED_SRC_FLDR)/memcached $(SCRIPT_FLDR)/trigger_migration.sh $(SCRIPT_FLDR)/start_memcached.sh $(SCRIPT_FLDR)/get_memcached_libs.sh
@@ -83,6 +80,7 @@ server: $(DUMP_TIME_SRC_FLDR)/dump_time $(MIGRATION_SRC_FLDR)/periodic_migration
 	cp $(SCRIPT_FLDR)/start_memcached.sh copy_on_board/start_memcached.sh
 	cp $(SCRIPT_FLDR)/oneliner.sh copy_on_board/oneliner.sh
 	cp $(SCRIPT_FLDR)/mutilate-migration-localhost.sh copy_on_board/mutilate-migration.sh
+	cp test/busybox-armv8l copy_on_board/busybox-armv8l
 ifneq ($(SERVER),)
 	scp -R copy_on_board/* $(SERVER):memcached-nix/
 endif
@@ -96,6 +94,7 @@ nfs: $(DUMP_TIME_SRC_FLDR)/dump_time $(MIGRATION_SRC_FLDR)/periodic_migration $(
 	cp $(SCRIPT_FLDR)/start_memcached.sh $(NFS_TARGET_FLDR)/start_memcached.sh
 	cp $(SCRIPT_FLDR)/oneliner.sh $(NFS_TARGET_FLDR)/oneliner.sh
 	cp $(SCRIPT_FLDR)/mutilate-migration-localhost.sh $(NFS_TARGET_FLDR)/mutilate-migration.sh
+	cp test/busybox-armv8l $(NFS_TARGET_FLDR)/busybox-armv8l
 	-chmod -R 775 $(NFS_TARGET_FLDR)
 
 client: mutilate

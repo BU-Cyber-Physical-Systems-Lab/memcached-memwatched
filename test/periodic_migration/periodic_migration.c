@@ -1,4 +1,5 @@
 #include "locusta.h"
+#include "scheduling.h"
 #include <errno.h>
 #include <fenv.h>
 #include <limits.h>
@@ -38,6 +39,11 @@ int main(int argc, char **argv) {
   struct itimerspec timer_spec;
   struct timespec initial_delay = {0, 1}, period = {0, 0};
   sigset_t mask;
+  res=set_sched_fifo_prio(99); // use RTBENCH utils to set this process priority as FIFO 99
+  if (res < 0) {
+    fprintf(stderr, "Raise priority of migration process\n");
+    return -1;
+  }
   res = sigemptyset(&mask);
   if (res < 0) {
     fprintf(stderr, "Cannot empty signal mask\n");
