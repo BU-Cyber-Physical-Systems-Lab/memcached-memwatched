@@ -27,6 +27,7 @@ pkgs-cross.mkShell {
     zeromq
     pkgs-cross.stdenv.cc
     pkgs-cross.stdenv.cc.bintools
+    treefmt
   ];
 
   buildInputs= with pkgs-cross; [

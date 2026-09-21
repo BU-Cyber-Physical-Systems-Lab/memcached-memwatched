@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # $1: name of experiment
 # $2: subfolder of the experiment (optional)
+set -euo pipefail
 
 declare script_dir
 declare dir
@@ -57,11 +58,20 @@ script_dir="$(
 
 mutilate_agents_pids=()
 mutilate_num_agents=0
-mutilate_max_threads=16
+if [[ $mutilate_num_agents -gt 0 ]]; then
+    mutilate_master_threads=16
+    mutilate_agent_threads=$( echo "($(nproc) - $mutilate_master_threads) / $mutilate_num_agents" | bc)
+    mutilate_args="-B -R -D 4 -C 4"
+else
+    mutilate_master_threads=$(nproc)
+    mutilate_agent_threads=0
+    mutilate_args=""
+fi
 mutilate_agents_start_port=5556
 mutilate_agents_ip="127.0.0.1"
 ramdisk_path=/tmp/memcached_ramdisk
 experiment=$1
+mem_file_size=64
 dir="$script_dir"/../data/$2/$experiment
 server_ip=10.210.1.187
 mutilate_runtime=5
@@ -76,35 +86,37 @@ mode=${rest#*-}
 mutilate_pwd="$script_dir/../test/mutilate/mutilate"
 mutilate_output_file="$dir/$experiment.log"
 mutilate_stats_file="$dir/${experiment}_stats.txt"
-mutilate_num_agents=$(echo "$(nproc) / $mutilate_max_threads" | bc)
 
 
-ssh "root@$server_ip" "touch $ramdisk_path && truncate -s 41M $ramdisk_path"
+ssh "root@$server_ip" "touch $ramdisk_path && truncate -s ${mem_file_size}M $ramdisk_path"
 
 echo "src:$source_location dst:$destination engine:$engine mode:$mode"
+memcached_args_common="-m $mem_file_size"
+#memcached_buffer_args="-w ${mem_file_size}M"
+memcached_buffer_args="--memory-file=$ramdisk_path"
 case "$source_location" in
     baseline_nomw)
-		memcached_args=""
+		memcached_args="$memcached_args_common"
         src_id=0
 		;;
     baseline)
-		memcached_args="--memory-file=$ramdisk_path -m 40"
+		memcached_args="$memcached_args_common"
         src_id=0
 		;;
 	DRAM)
-		memcached_args="--memory-file=$ramdisk_path -m 40"
+		memcached_args="$memcached_buffer_args $memcached_args_common"
         src_id=0
 		;;
 	pDRAM)
-		memcached_args="--memory-file=$ramdisk_path:0x60000000 -m 40"
+		memcached_args="$memcached_buffer_args:0x60000000 $memcached_args_common"
         src_id=1
 		;;
 	BRAM)
-		memcached_args="--memory-file=$ramdisk_path:0xa0000000 -m 40"
+		memcached_args="$memcached_buffer_args:0xa0000000 $memcached_args_common"
         src_id=2
 		;;
 	*)
-		memcached_args="--memory-file=$ramdisk_path -m 40"
+		memcached_args="$memcached_buffer_args $memcached_args_common"
         src_id=0
 		;;
 esac
@@ -190,7 +202,9 @@ ssh root@$server_ip ./busybox-armv8l taskset -p 0xe "$server_memcached_pid"
 # start mutilate agents
 echo "Starting agents"
 for (( i=0 ; i < mutilate_num_agents ; i++ )); do
-    $mutilate_pwd -T "$mutilate_max_threads" -c 4 -q 200000 -A -p "$(( mutilate_agents_start_port + i ))" &
+    $mutilate_pwd \
+    -q 200000 -i fb_ia -K 30 -V 200 -r 10000 -u 0.0 \
+    -T "$mutilate_agent_threads" -d 4 -c 4 -A -p "$(( mutilate_agents_start_port + i ))" &
     mutilate_agents_pids+=($!)
     mutilate_args="$mutilate_args -a $mutilate_agents_ip:$(( mutilate_agents_start_port + i ))"
 done
@@ -200,7 +214,7 @@ $mutilate_pwd --loadonly --server=$server_ip
 # start mutilate master, connect to agents and start issuing requests
 echo "DB loaded, starting experiment"
 if [[ ! "$engine" =~ ^baseline ]] && [[ "$engine" != "warmup" ]]; then
-    ssh root@$server_ip ./memcached-nix/periodic_migration -v \
+    ssh root@$server_ip ./memcached-nix/periodic_migration \
         -s "$dst_signal_id,$src_signal_id" -d "$migration_delay" \
         -t "$server_memcached_pid" -p "$migration_period" &
     migration_job=$!
@@ -210,14 +224,17 @@ fi
 ssh root@$server_ip "./memcached-nix/dump_time"
 $mutilate_pwd --noload --save="$mutilate_output_file" \
     -w "$mutilate_warmup_time" --server="$server_ip" \
-    -t "$mutilate_runtime" -T "$mutilate_max_threads" \
-    -B -R -D 4 -C 4 -c 4 -Q 1000 $mutilate_args \
+    -t "$mutilate_runtime" -T "$mutilate_master_threads" -d 4 -c 4 \
+    -q 200000 -i fb_ia  -K fb_key -V fb_value -r 10000 -u 0 \
+    $mutilate_args \
     > "$mutilate_stats_file" &
 mutilate_job=$!
 if [[ ! "$engine" =~ ^baseline ]] && [[ "$engine" != "warmup" ]]; then
     wait -f $mutilate_job
     ssh root@$server_ip killall -INT periodic_migration
-    killall mutilate
+    if [[ $mutilate_num_agents -gt 0 ]]; then
+        killall mutilate
+    fi
     wait -f "$migration_job"
 else
     wait -f "$mutilate_job"

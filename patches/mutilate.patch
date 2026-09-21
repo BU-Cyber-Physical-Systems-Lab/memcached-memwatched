@@ -71,21 +71,18 @@ index 57d0054..71fec7d 100644
  env.Command(['cmdline.cc', 'cmdline.h'], 'cmdline.ggo', 'gengetopt < $SOURCE')
  
 diff --git a/mutilate.cc b/mutilate.cc
-index 426fd05..132fc8f 100644
+index 426fd05..67d06a4 100644
 --- a/mutilate.cc
 +++ b/mutilate.cc
-@@ -146,8 +146,8 @@ static bool s_send (zmq::socket_t &socket, const std::string &string) {
-  * [IF WARMUP]  0:  Everyone: RUN for options.warmup seconds.
-  * 1. Master <-> Agent: Synchronize
-  * 2. Everyone: RUN for options.time seconds.
-- * 3. Master -> Agent: Dummy message
-- * 4. Agent -> Master: Send AgentStats [w/ RX/TX bytes, # gets/sets]
-+ * 3. Master -> Agent: Dummy m(essage
-+   .override {static=true;})* 4. Agent -> Master: Send AgentStats [w/ RX/TX bytes, # gets/sets]
-  *
-  * The master then aggregates AgentStats across all agents with its
-  * own ConnectionStats to compute overall statistics.
-@@ -979,6 +979,14 @@ void do_mutilate(const vector<string>& servers, options_t& options,
+@@ -413,6 +413,7 @@ string name_to_ipaddr(string host) {
+ }
+ 
+ int main(int argc, char **argv) {
++  srand48(0xb00b5);
+   if (cmdline_parser(argc, argv, &args) != 0) exit(-1);
+ 
+   for (unsigned int i = 0; i < args.verbose_given; i++)
+@@ -979,6 +980,14 @@ void do_mutilate(const vector<string>& servers, options_t& options,
      V("started at %f", get_time());
  
    start = get_time();
@@ -100,7 +97,7 @@ index 426fd05..132fc8f 100644
    for (Connection *conn: connections) {
      conn->start_time = start;
      conn->start(); // Kick the Connection into motion.
-@@ -1056,7 +1064,11 @@ void args_to_options(options_t* options) {
+@@ -1056,7 +1065,11 @@ void args_to_options(options_t* options) {
    //  if (args.no_record_scale_given)
    //    options->records = args.records_arg;
    //  else

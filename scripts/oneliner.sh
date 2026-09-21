@@ -19,5 +19,5 @@ for experiment in "${experiments[@]}"; do
     sleep 1
 done
 if [[ -f $script_dir/plots.py ]]; then
-    python3 $script_dir/plots.py "$1"
+    python3 $script_dir/plots.py "$script_dir/../data/$1"
 fi

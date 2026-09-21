@@ -15,6 +15,7 @@ mkShell {
     automake
     autoconf
     openssl
+    treefmt
     pkg-config-unwrapped
     scons
     (libevent.override {static=true;})

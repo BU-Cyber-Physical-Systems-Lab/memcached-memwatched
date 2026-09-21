@@ -21,14 +21,16 @@ def plot_latencies(input_path: Path, output_path: Path | None, output_name: str,
         names=["timestamp", "latency_us"],
         dtype=np.float64,
     )
-    df = df.sort_values(by=["timestamp"]).reset_index()
     df = df[df["timestamp"] > 3]
-    #df["timestamp"]=df["timestamp"].apply(lambda x: float(f"{x:.3f}"))
+    df = df.sort_values(by=["timestamp"]).reset_index()
+    print(f"BEFORE MEAN: num samples: {df[df.columns[0]].count()} worst latency: \n{df[df['latency_us'] == df['latency_us'].max()]}")
+    df["timestamp"]=df["timestamp"].apply(lambda x: float(f"{x:.3f}"))
+    df=df.groupby(["timestamp"]).mean().reset_index()
     last_request = df["timestamp"].iloc[-1]
-    print(f"worst latency: \n{df[df['latency_us'] == df['latency_us'].max()]}")
+    print(f"AFTER MEAN: num samples: {df[df.columns[0]].count()} worst latency: \n{df[df['latency_us'] == df['latency_us'].max()]}")
     print(df.head())
 
-    sns.lineplot(data=df, x="timestamp", y="latency_us", errorbar=None)
+    sns.lineplot(data=df, x="timestamp", y="latency_us")
 
     migration_filename = input_path / "migration_timestamp.log"
     mutilate_start_filename = input_path / "mutilate_start.log"
@@ -103,6 +105,9 @@ def main():
                 dtype=np.float64,
             )
             df = df[df["timestamp"] > 3]
+            df["timestamp"]=df["timestamp"].apply(lambda x: float(f"{x:.3f}"))
+            df=df.groupby(["timestamp"]).mean().reset_index()
+            print(f"{item}.log max: {df["latency_us"].max()} ")
             global_ylim= max(df["latency_us"].max()*1.05, global_ylim)
         else:
             df = pd.read_csv(
@@ -112,8 +117,10 @@ def main():
                 names=["timestamp", "latency_us"],
                 dtype=np.float64,
             )
+            print(f"{file}.log max: {df["latency_us"].max()} ")
             global_ylim= max(df["latency_us"].max(), global_ylim)
 
+    print(f"global y limit: {global_ylim}")
     for item in file.iterdir():
         if item.is_dir():
             print(f"Plotting {item.name}")
