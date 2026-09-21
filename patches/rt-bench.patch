@@ -31,6 +31,12 @@ index 50c17b9..305b0c8 100644
  
  #optional features
  
+diff --git a/generator/src/dlmalloc b/generator/src/dlmalloc
+--- a/generator/src/dlmalloc
++++ b/generator/src/dlmalloc
+@@ -1 +1 @@
+-Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3
++Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3-dirty
 diff --git a/generator/src/memory_watcher.c b/generator/src/memory_watcher.c
 index 1c2d310..99736d2 100644
 --- a/generator/src/memory_watcher.c

@@ -22,6 +22,7 @@ SERVER?=
 CLIENT?=
 LDFLAGS+=-static
 SCONS_OPTS=linkflags=$(LDFLAGS)
+NFS_TARGET_FLDR?=/nfsroot/fciraolo/Locusta/memcached/
 ifdef CROSS_COMPILE
 LDFLAGS+=-lc
 CONFIGURE_OPTS+=--host=$(CROSS_COMPILE:-=)
@@ -85,6 +86,17 @@ server: $(DUMP_TIME_SRC_FLDR)/dump_time $(MIGRATION_SRC_FLDR)/periodic_migration
 ifneq ($(SERVER),)
 	scp -R copy_on_board/* $(SERVER):memcached-nix/
 endif
+nfs: $(DUMP_TIME_SRC_FLDR)/dump_time $(MIGRATION_SRC_FLDR)/periodic_migration $(MUTILATE_SRC_FLDR)/mutilate $(MEMCACHED_SRC_FLDR)/memcached $(SCRIPT_FLDR)/trigger_migration.sh $(SCRIPT_FLDR)/start_memcached.sh $(SCRIPT_FLDR)/get_memcached_libs.sh
+	mkdir -p $(NFS_TARGET_FLDR)
+	cp $(DUMP_TIME_SRC_FLDR)/dump_time $(NFS_TARGET_FLDR)/dump_time
+	cp $(MIGRATION_SRC_FLDR)/periodic_migration $(NFS_TARGET_FLDR)/periodic_migration
+	cp $(MEMCACHED_SRC_FLDR)/memcached $(NFS_TARGET_FLDR)/memcached
+	-cp $(MUTILATE_SRC_FLDR)/mutilate-cross $(NFS_TARGET_FLDR)/mutilate
+	cp $(SCRIPT_FLDR)/trigger_migration.sh $(NFS_TARGET_FLDR)/trigger_migration.sh
+	cp $(SCRIPT_FLDR)/start_memcached.sh $(NFS_TARGET_FLDR)/start_memcached.sh
+	cp $(SCRIPT_FLDR)/oneliner.sh $(NFS_TARGET_FLDR)/oneliner.sh
+	cp $(SCRIPT_FLDR)/mutilate-migration-localhost.sh $(NFS_TARGET_FLDR)/mutilate-migration.sh
+	-chmod -R 775 $(NFS_TARGET_FLDR)
 
 client: mutilate
 ifneq ($(CLIENT),)

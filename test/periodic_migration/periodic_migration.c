@@ -26,6 +26,7 @@ static inline void help(char *name) {
 }
 
 int main(int argc, char **argv) {
+  char* output_filename="interrupts.log";
   int num_signals_to_send = 0, *signals_to_send = NULL, period_id = 0;
   pid_t target = 0;
   int res, opt, recv_sig = 0;
@@ -43,10 +44,13 @@ int main(int argc, char **argv) {
     return -1;
   }
   do {
-    opt = getopt(argc, argv, "-ht:s:d:p:v");
+    opt = getopt(argc, argv, "-ht:s:d:p:vf:");
     switch (opt) {
     case 'v':
       verbose++;
+      break;
+    case 'f':
+      output_filename = optarg;
       break;
     case 's':
       char *tmp_signal = NULL;
@@ -179,7 +183,7 @@ int main(int argc, char **argv) {
     free(signals_to_send);
     return res;
   }
-  FILE *file = fopen("interrupts.log", "w");
+  FILE *file = fopen(output_filename, "w");
   if (file == NULL) {
     perror("Cannot open output file");
     timer_delete(period_timer);

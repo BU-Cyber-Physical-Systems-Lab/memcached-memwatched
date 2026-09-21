@@ -65,8 +65,6 @@ def plot_latencies(input_path: Path, output_path: Path | None, output_name: str,
     sns.violinplot(
         x=df["latency_us"],
     )
-    plt.xlabel("Timestamp from application start (s)")
-    plt.ylabel(r"Request latency ($\mu$s)")
     plt.title(f"{input_path.stem}")
 
     plt.tight_layout()

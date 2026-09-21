@@ -1,2 +1,4 @@
 .*
+*.log
+*-eric
 copy_on_board
