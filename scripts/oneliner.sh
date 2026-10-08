@@ -6,28 +6,27 @@ declare -a experiments
 declare script_dir
 
 script_dir="$(
-  cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1
-  pwd -P
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1
+    pwd -P
 )"
 
 case "$2" in
-    *10.210.1.187 | daniele)
-        ssh_target="root@10.210.1.187"
-        board_name="daniele"
-        ;;
-    *)
-        echo "Invalid ssh target!"
-        exit 1
-        ;;
+*10.210.1.187 | daniele)
+    ssh_target="root@10.210.1.187"
+    board_name="daniele"
+    ;;
+*)
+    echo "Invalid ssh target!"
+    exit 1
+    ;;
 esac
 
+experiments=("baseline_nomw" "baseline" "overheads" "DRAM2DRAM-sw-sync" "DRAM2pDRAM-sw-sync" "pDRAM2DRAM-sw-sync") # "pDRAM2pDRAM-sw-sync")
 
-experiments=("baseline_nomw" "baseline" "overheads" "DRAM2DRAM-sw-sync" "DRAM2pDRAM-sw-sync" "pDRAM2DRAM-sw-sync" "pDRAM2pDRAM-sw-sync")
-
-bash "$script_dir/mutilate-migration.sh" "warmup" "$1" "$board_name" "$ssh_target"
+bash "$script_dir/mutilate-migration-multihost.sh" "warmup" "$1" "$board_name" "$ssh_target"
 for experiment in "${experiments[@]}"; do
     sleep 1
-    bash "$script_dir/mutilate-migration.sh" "$experiment" "$1" "$board_name" "$ssh_target"
+    bash "$script_dir/mutilate-migration-multihost.sh" "$experiment" "$1" "$board_name" "$ssh_target"
     sleep 1
 done
 if [[ -f $script_dir/plots.py ]]; then

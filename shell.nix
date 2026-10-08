@@ -1,10 +1,19 @@
 {
   pkgs ? import <nixpkgs> { },
+libsodium-static ? pkgs.libsodium.overrideAttrs (old: {
+  dontDisableStatic = true;
+}),
+libevent-static ? 
+    (pkgs.libevent.override {static=true;}),
+zeromq-static ? pkgs.zeromq.overrideAttrs (old: {
+  dontDisableStatic = true;
+}),
+
 }:
 
 with pkgs;
-
-mkShell {
+mkShell
+{
   buildInputs = with pkgs; [
     stdenv
     stdenv.cc
@@ -18,9 +27,11 @@ mkShell {
     treefmt
     pkg-config-unwrapped
     scons
-    (libevent.override {static=true;})
     gengetopt
-    zeromq
+    zeromq-static
+libevent-static
+libsodium-static
+cppzmq
     git
     python3
     python3Packages.numpy
@@ -29,4 +40,7 @@ mkShell {
     python3Packages.matplotlib
     python3Packages.tqdm
   ];
+shellHook = ''
+  export PKG_CONFIG_PATH="${libevent-static.dev}/lib/pkgconfig:${libsodium-static.dev}/lib/pkgconfig:${zeromq-static}/lib/pkgconfig:$PKG_CONFIG_PATH"
+'';
 }

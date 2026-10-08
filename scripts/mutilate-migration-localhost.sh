@@ -46,6 +46,7 @@ destination=${rest%%-*}
 rest=${rest#*-}
 engine=${rest%%-*}
 mode=${rest#*-}
+mutilate_exec_args="-d 4 -c 4 -q 0 -i fb_ia -K fb_key -V fb_value -u 0.2 -r 100000"
 
 touch "$ramdisk_path"
 truncate -s 41M "$ramdisk_path"
@@ -156,11 +157,11 @@ memcached_pid=$(pidof memcached)
 ../busybox-armv8l taskset -p 0x8 $memcached_pid
 sleep 1
 #load mutilate DB
-"$script_dir"/mutilate -v --loadonly --server=$server_ip
+"$script_dir"/mutilate -v $mutilate_exec_args --loadonly --server=$server_ip
 # start issuing requests using background agents
 "$script_dir"/mutilate -v --server=$server_ip --noload \
-    -B -T 16 \
-    -c 4 \
+    $mutilate_exec_args \
+    -c 4 -d  4\
     --save="${dir}/${experiment}.log" \
     -w $mutilate_warmup_time -t $mutilate_runtime > "${dir}/${experiment}_stats.txt" &
 mutilate_pid=$!

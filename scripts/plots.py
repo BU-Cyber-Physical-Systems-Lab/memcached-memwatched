@@ -60,6 +60,7 @@ def plot_latencies(input_path: Path, output_path: Path | None, output_name: str,
 
     plt.tight_layout()
     plt.savefig(f"{output_path}/{output_name}.pdf")
+    #plt.show()
     plt.close()
 
     sns.violinplot(
