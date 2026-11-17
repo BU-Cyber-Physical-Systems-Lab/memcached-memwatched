@@ -1,0 +1,306 @@
+diff --git a/tensorflow/lite/BUILD b/tensorflow/lite/BUILD
+index ed2ea9af4bd..82ffe383a54 100644
+--- a/tensorflow/lite/BUILD
++++ b/tensorflow/lite/BUILD
+@@ -364,6 +364,7 @@ cc_library(
+         ":macros",
+         ":tensorflow_profiler_logger_shim",
+         "//tensorflow/lite/core/c:common",
++    "//tensorflow/lite/locusta:locusta",
+     ],
+ )
+ 
+@@ -378,6 +379,7 @@ cc_library(
+         ":macros",
+         ":tensorflow_profiler_logger_shim",
+         "//tensorflow/lite/core/c:common",
++    "//tensorflow/lite/locusta:locusta",
+     ],
+ )
+ 
+diff --git a/tensorflow/lite/arena_planner.cc b/tensorflow/lite/arena_planner.cc
+index 4f21713e84d..87a0fd53730 100644
+--- a/tensorflow/lite/arena_planner.cc
++++ b/tensorflow/lite/arena_planner.cc
+@@ -23,12 +23,30 @@ limitations under the License.
+ #include <utility>
+ #include <vector>
+ 
++#include "arena_planner.h"
+ #include "tensorflow/lite/core/c/common.h"
+ #include "tensorflow/lite/graph_info.h"
+ #include "tensorflow/lite/simple_memory_arena.h"
+ 
+ namespace tflite {
+ 
++ struct fixed_memory_arena fixed_arena;
++
++void enable_fixed_arena(size_t size, uint64_t start) {
++  fixed_arena.enable = true;
++  fixed_arena.global_size = size;
++  fixed_arena.normal_size = size/2;
++  fixed_arena.persistent_size = size/2;
++  fixed_arena.global_start_offset = start;
++  fixed_arena.persistent_start_offset = 0;
++  fixed_arena.persistent_start_offset = fixed_arena.global_start_offset +(size /2);
++  fixed_arena.base_pointer=(char*)mmap(NULL,fixed_arena.global_size,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
++    mlockall(MCL_CURRENT | MCL_FUTURE);
++  printf("setting up migration handler\n");
++  setup_migration(fixed_arena.base_pointer,fixed_arena.global_start_offset, fixed_arena.global_size/getpagesize(),0);
++  printf("Migration handler ready\n");
++}
++
+ constexpr int32_t kLastActiveNodeUndefined =
+     std::numeric_limits<int32_t>::max();
+ constexpr int32_t kNodeNotAssigned = std::numeric_limits<int32_t>::max();
+@@ -40,16 +58,21 @@ ArenaPlanner::ArenaPlanner(TfLiteContext* context,
+                            int subgraph_index)
+     : context_(context),
+       graph_info_(std::move(graph_info)),
+-      arena_(kDefaultArenaAlignment, subgraph_index),
+       has_nonpersistent_memory_(false),
+-      persistent_arena_(kDefaultArenaAlignment, subgraph_index),
+       preserve_all_tensors_(preserve_all_tensors),
+       tensor_alignment_(tensor_alignment),
++    arena_(kDefaultArenaAlignment, subgraph_index,fixed_arena.base_pointer + fixed_arena.normal_start_offset,fixed_arena.normal_size),
++    persistent_arena_(kDefaultArenaAlignment, subgraph_index,fixed_arena.base_pointer + fixed_arena.persistent_start_offset,fixed_arena.persistent_size),
+       last_active_node_(kLastActiveNodeUndefined) {}
+ 
+ ArenaPlanner::~ArenaPlanner() {
+-  arena_.ReleaseBuffer();
+-  persistent_arena_.ReleaseBuffer();
++  if (fixed_arena.enable) {
++    munlockall();
++    munmap(fixed_arena.base_pointer,fixed_arena.global_size);
++  }else{
++    arena_.ReleaseBuffer();
++    persistent_arena_.ReleaseBuffer();
++  }
+ }
+ 
+ std::intptr_t ArenaPlanner::BasePointer(TfLiteAllocationType type) {
+diff --git a/tensorflow/lite/arena_planner.h b/tensorflow/lite/arena_planner.h
+index f4644d15986..fc7660a40d9 100644
+--- a/tensorflow/lite/arena_planner.h
++++ b/tensorflow/lite/arena_planner.h
+@@ -28,6 +28,12 @@ limitations under the License.
+ #include "tensorflow/lite/simple_memory_arena.h"
+ #include "tensorflow/lite/util.h"
+ 
++extern "C" {
++  #include <sys/mman.h>
++  #include "tensorflow/lite/locusta/locusta.h"
++}
++
++
+ namespace tflite {
+ 
+ constexpr const int kDefaultArenaAlignment = 64;
+@@ -168,6 +174,15 @@ class ArenaPlanner : public MemoryPlanner {
+   std::vector<int> refcounts_;
+ };
+ 
++struct fixed_memory_arena {
++  bool enable;
++  uint64_t global_start_offset,persistent_start_offset, normal_start_offset ;
++  size_t global_size,normal_size,persistent_size;
++  char* base_pointer;
++};
++
++extern struct fixed_memory_arena fixed_arena;
++void enable_fixed_arena(size_t size, uint64_t start);
+ }  // namespace tflite
+ 
+ #endif  // TENSORFLOW_LITE_ARENA_PLANNER_H_
+diff --git a/tensorflow/lite/simple_memory_arena.cc b/tensorflow/lite/simple_memory_arena.cc
+index f1299b56ac7..b47c862286d 100644
+--- a/tensorflow/lite/simple_memory_arena.cc
++++ b/tensorflow/lite/simple_memory_arena.cc
+@@ -148,9 +148,8 @@ tflite::PointerAlignedPointerPair AlignedRealloc(
+ }  // namespace
+ 
+ namespace tflite {
+-
+ bool ResizableAlignedBuffer::Resize(size_t new_size) {
+-  if (new_size <= data_size_) {
++  if (new_size <= data_size_ || preallocated_buffer) {
+     // Skip reallocation when resizing down.
+     return false;
+   }
+diff --git a/tensorflow/lite/simple_memory_arena.h b/tensorflow/lite/simple_memory_arena.h
+index 7275b3014f3..59f8708c19a 100644
+--- a/tensorflow/lite/simple_memory_arena.h
++++ b/tensorflow/lite/simple_memory_arena.h
+@@ -60,17 +60,20 @@ struct PointerAlignedPointerPair {
+ 
+ class ResizableAlignedBuffer {
+  public:
+-  ResizableAlignedBuffer(size_t alignment, int subgraph_index)
+-      : buffer_{nullptr, nullptr},
+-        data_size_(0),
++  ResizableAlignedBuffer(size_t alignment, int subgraph_index,char* buffer_base=NULL,size_t buffer_size=0)
++      : buffer_{buffer_base, buffer_base},
++        data_size_(buffer_size),
+         alignment_(alignment),
+         subgraph_index_(subgraph_index) {
+     // To silence unused private member warning, only used with
+     // TF_LITE_TENSORFLOW_PROFILER
+     (void)subgraph_index_;
++    if (buffer_base != NULL) {
++      preallocated_buffer = true;
++    }
+   }
+ 
+-  ~ResizableAlignedBuffer() { Release(); }
++ ~ResizableAlignedBuffer() { if (! preallocated_buffer) Release(); }
+ 
+   // Resizes the buffer to make sure new_size bytes fit in the buffer. Keeps
+   // alignment and any existing the data. Returns true when any external
+@@ -97,7 +100,8 @@ class ResizableAlignedBuffer {
+   size_t data_size_;
+   size_t alignment_;
+ 
+-  int subgraph_index_;
++ int subgraph_index_;
++ bool preallocated_buffer;
+ };
+ 
+ // This small class is responsible for allocating, deallocating and reusing
+@@ -107,10 +111,10 @@ class ResizableAlignedBuffer {
+ // zero-sized allocations are explicitly allowed, and will resolve to null.
+ class SimpleMemoryArena {
+  public:
+-  explicit SimpleMemoryArena(size_t arena_alignment, int subgraph_index = 0)
++  explicit SimpleMemoryArena(size_t arena_alignment, int subgraph_index = 0,char* arena_base=NULL,size_t arena_size=0)
+       : committed_(false),
+         high_water_mark_(0),
+-        underlying_buffer_(arena_alignment, subgraph_index),
++        underlying_buffer_(arena_alignment, subgraph_index,arena_base,arena_size),
+         active_allocs_() {}
+ 
+   // Delete all allocs. This should be called when allocating the first node of
+diff --git a/tensorflow/lite/tools/benchmark/BUILD b/tensorflow/lite/tools/benchmark/BUILD
+index 4577c2afb2c..b5decc16dbb 100644
+--- a/tensorflow/lite/tools/benchmark/BUILD
++++ b/tensorflow/lite/tools/benchmark/BUILD
+@@ -28,6 +28,7 @@ cc_library(
+     deps = [
+         ":benchmark_tflite_model_lib",
+         "//tensorflow/lite/tools:logging",
++    "//tensorflow/lite/locusta:locusta",
+     ],
+ )
+ 
+diff --git a/tensorflow/lite/tools/benchmark/benchmark_main.cc b/tensorflow/lite/tools/benchmark/benchmark_main.cc
+index 43b249080a2..59fe5a88b2b 100644
+--- a/tensorflow/lite/tools/benchmark/benchmark_main.cc
++++ b/tensorflow/lite/tools/benchmark/benchmark_main.cc
+@@ -18,17 +18,24 @@ limitations under the License.
+ #include "tensorflow/lite/tools/benchmark/benchmark_tflite_model.h"
+ #include "tensorflow/lite/tools/logging.h"
+ 
++extern "C" {
++  #include "tensorflow/lite/locusta/memory_watcher.h"
++  #include "tensorflow/lite/locusta/locusta.h"
++}
++
+ namespace tflite {
+ namespace benchmark {
+ 
+ int Main(int argc, char** argv) {
++  int res=EXIT_SUCCESS;
+   TFLITE_LOG(INFO) << "STARTING!";
+   BenchmarkTfLiteModel benchmark;
+   if (benchmark.Run(argc, argv) != kTfLiteOk) {
+     TFLITE_LOG(ERROR) << "Benchmarking failed.";
+-    return EXIT_FAILURE;
++    res= EXIT_FAILURE;
+   }
+-  return EXIT_SUCCESS;
++  destroy_migration_handler();
++  return res;
+ }
+ }  // namespace benchmark
+ }  // namespace tflite
+diff --git a/tensorflow/lite/tools/benchmark/benchmark_tflite_model.cc b/tensorflow/lite/tools/benchmark/benchmark_tflite_model.cc
+index 9384380ca60..c5ecc2f11e2 100644
+--- a/tensorflow/lite/tools/benchmark/benchmark_tflite_model.cc
++++ b/tensorflow/lite/tools/benchmark/benchmark_tflite_model.cc
+@@ -63,6 +63,8 @@ limitations under the License.
+ #include "tensorflow/lite/tools/logging.h"
+ #include "tensorflow/lite/tools/model_loader.h"
+ #include "tensorflow/lite/tools/utils.h"
++#include "tensorflow/lite/arena_planner.h"
++
+ 
+ void RegisterSelectedOps(::tflite::MutableOpResolver* resolver);
+ 
+@@ -640,6 +642,10 @@ TfLiteStatus BenchmarkInterpreterRunner::ResizeInputTensor(
+ BenchmarkParams BenchmarkTfLiteModel::DefaultParams() {
+   BenchmarkParams default_params = BenchmarkModel::DefaultParams();
+   default_params.AddParam("graph", BenchmarkParam::Create<std::string>(""));
++default_params.AddParam(
++    "fixed_arena_size", BenchmarkParam::Create<std::string>("0"));
++default_params.AddParam(
++    "fixed_arena_start", BenchmarkParam::Create<std::string>("0x0"));
+   default_params.AddParam("signature_to_run_for",
+                           BenchmarkParam::Create<std::string>(""));
+   default_params.AddParam("list_signatures",
+@@ -731,6 +737,8 @@ BenchmarkTfLiteModel::~BenchmarkTfLiteModel() {
+ std::vector<Flag> BenchmarkTfLiteModel::GetFlags() {
+   std::vector<Flag> flags = BenchmarkModel::GetFlags();
+   std::vector<Flag> specific_flags = {
++    CreateFlag<std::string>("fixed_arena_size", &params_, "Fixed memory arena heap size in MB"),
++      CreateFlag<std::string>("fixed_arena_start", &params_, "Fixed memory arena heap start"),
+       CreateFlag<std::string>("graph", &params_, "graph file name"),
+       CreateFlag<std::string>("input_layer", &params_, "input layer names"),
+       CreateFlag<std::string>("input_layer_shape", &params_,
+@@ -1147,6 +1155,22 @@ TfLiteStatus BenchmarkTfLiteModel::InitInterpreter() {
+ }
+ 
+ TfLiteStatus BenchmarkTfLiteModel::Init() {
++  int res=0;
++  size_t heap_size, heap_start;
++  res=sscanf(params_.Get<std::string>("fixed_arena_size").c_str(),"%zu",&heap_size);
++  if (!res) {
++    perror("Cannot parse fixed arena size flag");
++    return kTfLiteError;
++  }
++  res=sscanf(params_.Get<std::string>("fixed_arena_start").c_str(),"0x%lx",&heap_start);
++  if (!res) {
++    perror("Cannot parse fixed arena start flag");
++    return kTfLiteError;
++  }
++  if(heap_size >0){
++    heap_size= heap_size *1024 *1024; //convert from MB to bytes
++    enable_fixed_arena(heap_size,heap_start);
++  }
+   TF_LITE_ENSURE_STATUS(LoadModel());
+   TF_LITE_ENSURE_STATUS(InitInterpreter());
+ 
+diff --git a/third_party/xla/third_party/llvm/workspace.bzl b/third_party/xla/third_party/llvm/workspace.bzl
+index 9b5614a7248..4cb05defacd 100644
+--- a/third_party/xla/third_party/llvm/workspace.bzl
++++ b/third_party/xla/third_party/llvm/workspace.bzl
+@@ -5,7 +5,7 @@ load("//third_party:repo.bzl", "tf_http_archive")
+ def repo(name):
+     """Imports LLVM."""
+     LLVM_COMMIT = "909041e4802c4b9a2223ca04099f35bf1dbbd460"
+-    LLVM_SHA256 = "3f986184ee126677dbd77edb16d6b82c057ec869fefd7a9871979941e52e837a"
++    LLVM_SHA256 = "00b1077e029fa57e6f2d9ac24936a49acf23ebc051b04f487131116258be6248"
+ 
+     tf_http_archive(
+         name = name,
+diff --git a/third_party/xla/third_party/shardy/temporary.patch b/third_party/xla/third_party/shardy/temporary.patch
+index 0e22da75172..a05cae5316b 100644
+--- a/third_party/xla/third_party/shardy/temporary.patch
++++ b/third_party/xla/third_party/shardy/temporary.patch
+@@ -61,7 +61,7 @@ index 31e5be0..9b5614a 100644
+ -    LLVM_COMMIT = "d43b29fc545d702b35b20802f92357bc4c4177fe"
+ -    LLVM_SHA256 = "446644227d3b1f8837386536e33c0db24d8f4431fd1d63e155ddabf5a759db9b"
+ +    LLVM_COMMIT = "909041e4802c4b9a2223ca04099f35bf1dbbd460"
+-+    LLVM_SHA256 = "3f986184ee126677dbd77edb16d6b82c057ec869fefd7a9871979941e52e837a"
+++    LLVM_SHA256 = "00b1077e029fa57e6f2d9ac24936a49acf23ebc051b04f487131116258be6248"
+  
+      tf_http_archive(
+          name = name,

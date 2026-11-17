@@ -8,3 +8,6 @@
 [submodule "test/mutilate"]
 	path = test/mutilate
 	url = https://github.com/leverich/mutilate.git
+[submodule "src/tensorflow"]
+	path = src/tensorflow
+	url = https://github.com/tensorflow/tensorflow.git

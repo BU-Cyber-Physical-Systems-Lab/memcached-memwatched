@@ -11,6 +11,7 @@ BASE_FLDR=$(abspath $(lastword $(dir $(MAKEFILE_LIST))))
 PATCH_FLDR=$(BASE_FLDR)/patches
 SCRIPT_FLDR=$(BASE_FLDR)/scripts
 RTBENCH_SRC_FLDR=src/rt-bench
+TF_SRC_FLDR=src/tensorflow
 MEMCACHED_SRC_FLDR=src/memcached
 MUTILATE_SRC_FLDR=test/mutilate
 MIGRATION_SRC_FLDR=test/periodic_migration
@@ -32,6 +33,10 @@ endif
 all: memcached mutilate test
 setup: $(MEMCACHED_SRC_FLDR)/README.md src/rt-bench/README.md $(RTBENCH_SRC_FLDR)/generator/src/dlmalloc/source/dlmalloc.c $(MUTILATE_SRC_FLDR)/README.md
 test: mutilate periodic_migration dump_time
+
+$(TF_SRC_FLDR)/README.md:
+	@git submodule update --init $(TF_SRC_FLDR)
+	@git -C $(TF_SRC_FLDR) checkout v2.21.0
 
 $(MEMCACHED_SRC_FLDR)/README.md:
 	@git submodule update --init $(MEMCACHED_SRC_FLDR)
