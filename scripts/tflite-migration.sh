@@ -22,9 +22,10 @@ destination=${rest%%-*}
 rest=${rest#*-}
 engine=${rest%%-*}
 mode=${rest#*-}
-exec_time=5
-args=("--graph=$nfs_exec_dir/mobilenet_quant_v1_224.tflite" "--min_secs=$exec_time")
-args+=("--enable_op_profiling=true" "--op_profiling_output_mode=csv" "--op_profiling_output_file=$nfs_data_dir/op_profile.csv")
+exec_time=8
+jobs=5
+args=("--graph=$nfs_exec_dir/mobilenet_quant_v1_224.tflite" "--num_runs=$jobs")
+#args+=("--enable_op_profiling=true" "--op_profiling_output_mode=csv" "--op_profiling_output_file=$nfs_data_dir/op_profile.csv")
 echo "src:$source_location dst:$destination engine:$engine mode:$mode"
 case "$source_location" in
 baseline_nomw)
@@ -121,9 +122,9 @@ locusta)
 esac
 dst_signal_id=$(echo "$engine_id + ($dst_id * $dst_modes) + $mode_id" | bc)
 src_signal_id=$(echo "$engine_id + ($src_id * $dst_modes) + $mode_id" | bc)
-migration_period=$(echo "scale=3; $exec_time / 10" | bc)
-echo "$migration_period"
-migration_delay=$(echo "$migration_period+1" | bc)
+migration_period=$(echo "scale=6; $exec_time /$jobs / 2" | bc)
+migration_delay=$(echo "scale=6; 1+($exec_time /$jobs)" | bc)
+echo "migation stats: delay:${migration_delay}s, period:${migration_period}s"
 mkdir -p "$dir"
 ssh "$ssh_target" mkdir -p "$nfs_data_dir"
 echo "Chosen migration signal dst:$dst_signal_id src:$src_signal_id"

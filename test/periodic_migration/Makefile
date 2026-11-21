@@ -13,10 +13,10 @@ CC ?=gcc
 all: periodic_migration
 
 periodic_migration: periodic_migration.c scheduling.o
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CROSS_COMPILE)$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 scheduling.o: ../../src/rt-bench/generator/src/scheduling.c
-	$(CC) $(CFLAGS) -c -o $@ $^ $(LDFLAGS)
+	$(CROSS_COMPILE)$(CC) $(CFLAGS) -c -o $@ $^ $(LDFLAGS)
 
 clean:
 	-rm periodic_migration *.o

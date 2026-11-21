@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #$1: subfolder of each experiment
 #$2: ssh target (i.e. "root@10.210.1.187" or "daniele")
+#$3 board name
+#$4 list of benchmarks to use
 set -euo pipefail
 declare -a experiments
 declare script_dir
@@ -11,24 +13,34 @@ script_dir="$(
 )"
 
 case "$2" in
-*10.210.1.187 | daniele)
+daniele)
     ssh_target="root@10.210.1.187"
     board_name="daniele"
     ;;
 *)
-    echo "Invalid ssh target!"
-    exit 1
+    if (( $# < 4 )); then
+        echo "missing board name for target $2"
+        exit 1
+    fi
+    ssh_target="$2"
+    board_name=$4
     ;;
 esac
 
-experiments=("baseline_nomw" "baseline" "overheads" "DRAM2DRAM-sw-sync" "DRAM2pDRAM-sw-sync" "pDRAM2DRAM-sw-sync") # "pDRAM2pDRAM-sw-sync")
+experiments=("baseline_nomw" "baseline" "overheads" "DRAM2DRAM-sw-sync" "DRAM2pDRAM-sw-sync" "pDRAM2DRAM-sw-sync" "pDRAM2pDRAM-sw-sync")
 
-bash "$script_dir/mutilate-migration-multihost.sh" "warmup" "$1" "$board_name" "$ssh_target"
-for experiment in "${experiments[@]}"; do
-    sleep 1
-    bash "$script_dir/mutilate-migration-multihost.sh" "$experiment" "$1" "$board_name" "$ssh_target"
-    sleep 1
+for benchmark in $3; do
+    if [[ "$benchmark" == "mutilate" ]]; then
+        bash "$script_dir/mutilate-migration-multihost.sh" "warmup" "$1/$benchmark" "$board_name" "$ssh_target"
+        bmark_script="$benchmark-migration-multihost.sh"
+    else
+        bmark_script="$benchmark-migration.sh"
+    fi
+    for experiment in "${experiments[@]}"; do
+        bash "$script_dir/$bmark_script" "$experiment" "$1/$benchmark" "$board_name" "$ssh_target"
+    done
+    #if [[ -f $script_dir/plots.py ]]; then
+    #    python3 "$script_dir/plots.py" "/nfsroot/fciraolo/data/$2/$1"
+    #fi
+
 done
-if [[ -f $script_dir/plots.py ]]; then
-    python3 "$script_dir/plots.py" "/nfsroot/fciraolo/data/$2/$1"
-fi

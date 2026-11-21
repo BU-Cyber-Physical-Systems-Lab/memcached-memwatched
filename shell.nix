@@ -17,6 +17,8 @@ mkShell
   buildInputs = with pkgs; [
     stdenv
     stdenv.cc
+    uv
+    bazelisk
     stdenv.cc.libc.static
     stdenv.cc.bintools
     valgrind

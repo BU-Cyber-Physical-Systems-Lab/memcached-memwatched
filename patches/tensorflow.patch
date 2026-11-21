@@ -192,15 +192,14 @@ index 4577c2afb2c..b5decc16dbb 100644
  )
  
 diff --git a/tensorflow/lite/tools/benchmark/benchmark_main.cc b/tensorflow/lite/tools/benchmark/benchmark_main.cc
-index 43b249080a2..59fe5a88b2b 100644
+index 43b249080a2..579b4864c8a 100644
 --- a/tensorflow/lite/tools/benchmark/benchmark_main.cc
 +++ b/tensorflow/lite/tools/benchmark/benchmark_main.cc
-@@ -18,17 +18,24 @@ limitations under the License.
+@@ -18,17 +18,23 @@ limitations under the License.
  #include "tensorflow/lite/tools/benchmark/benchmark_tflite_model.h"
  #include "tensorflow/lite/tools/logging.h"
  
 +extern "C" {
-+  #include "tensorflow/lite/locusta/memory_watcher.h"
 +  #include "tensorflow/lite/locusta/locusta.h"
 +}
 +
@@ -222,6 +221,38 @@ index 43b249080a2..59fe5a88b2b 100644
  }
  }  // namespace benchmark
  }  // namespace tflite
+diff --git a/tensorflow/lite/tools/benchmark/benchmark_model.cc b/tensorflow/lite/tools/benchmark/benchmark_model.cc
+index 27dd3de3e3b..19ecb5f580d 100644
+--- a/tensorflow/lite/tools/benchmark/benchmark_model.cc
++++ b/tensorflow/lite/tools/benchmark/benchmark_model.cc
+@@ -222,7 +222,10 @@ StatWithPercentiles<int64_t> BenchmarkModel::Run(int min_num_times,
+                                                  float min_secs, float max_secs,
+                                                  RunType run_type,
+                                                  TfLiteStatus* invoke_status) {
+-  StatWithPercentiles<int64_t> run_stats;
++    StatWithPercentiles<int64_t> run_stats;
++    run_stats.SetName("jobs_latency");
++  StatWithPercentiles<int64_t> timestamp_stats;
++    timestamp_stats.SetName("jobs_timestamps");
+   TFLITE_LOG(INFO) << "Running benchmark for at least " << min_num_times
+                    << " iterations and at least " << min_secs << " seconds but"
+                    << " terminate if exceeding " << max_secs << " seconds.";
+@@ -254,6 +257,7 @@ StatWithPercentiles<int64_t> BenchmarkModel::Run(int min_num_times,
+     }
+ #endif
+     run_stats.UpdateStat(run_duration_us);
++    timestamp_stats.UpdateStat(start_us);
+     if (run_frequency > 0) {
+       inter_run_sleep_time =
+           next_run_finish_time - profiling::time::NowMicros() * 1e-6;
+@@ -271,6 +275,7 @@ StatWithPercentiles<int64_t> BenchmarkModel::Run(int min_num_times,
+ 
+   std::stringstream stream;
+   run_stats.OutputToStream(&stream);
++  timestamp_stats.OutputToStream(&stream);
+   TFLITE_LOG(INFO) << stream.str() << std::endl;
+ 
+   return run_stats;
 diff --git a/tensorflow/lite/tools/benchmark/benchmark_tflite_model.cc b/tensorflow/lite/tools/benchmark/benchmark_tflite_model.cc
 index 9384380ca60..c5ecc2f11e2 100644
 --- a/tensorflow/lite/tools/benchmark/benchmark_tflite_model.cc
@@ -304,3 +335,37 @@ index 0e22da75172..a05cae5316b 100644
   
       tf_http_archive(
           name = name,
+diff --git a/third_party/xla/xla/tsl/util/stats_calculator.h b/third_party/xla/xla/tsl/util/stats_calculator.h
+index 753df1ec067..3f3aba2ace4 100644
+--- a/third_party/xla/xla/tsl/util/stats_calculator.h
++++ b/third_party/xla/xla/tsl/util/stats_calculator.h
+@@ -129,6 +129,9 @@ class StatWithPercentiles : public Stat<ValueType, HighPrecisionValueType> {
+     Stat<ValueType, HighPrecisionValueType>::UpdateStat(v);
+     values_.push_back(v);
+   }
++  void SetName(std::string name) {
++            values_name_=name;
++  }
+ 
+   // Returns the percentile value.
+   ValueType percentile(int percentile) const {
+@@ -149,10 +152,19 @@ class StatWithPercentiles : public Stat<ValueType, HighPrecisionValueType> {
+     Stat<ValueType, HighPrecisionValueType>::OutputToStream(stream);
+     *stream << " p5=" << percentile(5) << " median=" << percentile(50)
+             << " p95=" << percentile(95);
++    *stream << std::endl << values_name_ << "=";
++    for (int i = 0; i < values_.size(); i++) {
++      if (i > 0) {
++        *stream <<",";
++      }
++      *stream << values_[i];
++    }
++    *stream << std::endl;
+   }
+ 
+  private:
+   std::vector<ValueType> values_;
++  std::string values_name_="";
+ };
+ 
+ // A StatsCalculator assists in performance analysis of Graph executions.

@@ -1,0 +1,17 @@
+[project]
+name = "locusta_bmarks"
+version = "0.1.0"
+description = "Python dependencies for locusta benchmarks"
+readme = "README.md"
+authors = [
+    { name = "nick1296", email = "mnico@bu.edu" }
+]
+requires-python = ">=3.10,<3.14"
+dependencies = ["pandas", "seaborn", "numpy", "matplotlib", "halo", "tqdm", "rich", "alive-progress"]
+
+[project.scripts]
+tensorflow = "tensorflow:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"

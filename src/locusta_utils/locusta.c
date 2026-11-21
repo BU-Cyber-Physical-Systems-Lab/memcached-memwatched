@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 /// Size of the migration in pages
 static size_t heap_size_pages = -1;
@@ -21,6 +22,9 @@ static struct migration_dst *hw_dsts;
 static size_t hw_dsts_count = 0;
 /// The amount of logs to print
 static int verbose = 0;
+/// `1` if a migration request is being processed, `0` otherwise.
+static volatile bool migration_in_progress =false;
+static volatile bool setup_done = false;
 
 /**@brief Select destination from migration destination address.
  * @param[in] engine The from which destinations are searched.
@@ -65,13 +69,23 @@ static inline int trigger_migration(struct migration_dst dst,
                                     enum migration_mode mode) {
   int dst_id = -1, res;
   size_t migration_size = 0;
+  bool expected_migration_status=false,desired_migration_status=true;
   union at_response response={0};
+  if (!setup_done) {
+    fprintf(stderr, "ERROR: Migration triggered before setup commpleted!\n");
+    return -1;
+  }
   if (migration_source == NULL) {
     fprintf(stderr, "ERROR: Migration source is NULL!\n");
     return -1;
   }
   if (heap_size_pages <= 0) {
     fprintf(stderr, "ERROR: Invalid heap size page count!\n");
+    return -1;
+  }
+  // https://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html
+  if ( !__atomic_compare_exchange(&migration_in_progress,&expected_migration_status,&desired_migration_status,false,__ATOMIC_SEQ_CST,__ATOMIC_SEQ_CST)) {
+    fprintf(stderr, "WARN: Another migration request is already being processed, try later\n");
     return -1;
   }
   dst_id = dst.id;
@@ -111,6 +125,8 @@ static inline int trigger_migration(struct migration_dst dst,
   if (res < 0) {
     fprintf(stderr, "ERROR: Migration failed!\n");
   }
+  desired_migration_status=false;
+  __atomic_store(&migration_in_progress,&desired_migration_status, __ATOMIC_SEQ_CST);
   return res;
 }
 
@@ -242,9 +258,23 @@ static inline void print_destinations(struct migration_dst *dsts,
 
 int setup_migration(void *source, size_t offset, size_t size,
                     int verbose_level) {
-  int res = -1;
+    int res = -1;
+    bool current_setup_val=false;
+    int migration_signals=DUMMY_SIGNALS + (SW_MODES * SW_DSTS) + (HW_MODES * HW_DSTS);
   verbose = verbose_level;
+  if (verbose > 0) {
+        fprintf(stderr,"DEBUG: migration source addr %p, offset %lu, size: %lu\n",source,offset,size);
+  }
+  __atomic_load(&setup_done,&current_setup_val,__ATOMIC_SEQ_CST);
+  if (current_setup_val) {
+    fprintf(stderr, "ERROR: Attempting to setup migration handler twice!\n");
+    return -1;
+  }
   sigset_t mask;
+  if (SIGRTMIN + migration_signals > SIGRTMAX -2 ) {
+    fprintf(stderr, "ERROR: more migration signals (%d) than the ones between SIGRTMIN (%d) and SIGRTMAX (%d) (%d >+ %d)!\n",migration_signals,SIGRTMIN,SIGRTMAX,SIGRTMIN + migration_signals,SIGRTMAX);
+    return -1;
+  }
   if (source == NULL) {
     fprintf(stderr, "ERROR: NULL migration destination!\n");
     return -1;
@@ -253,11 +283,13 @@ int setup_migration(void *source, size_t offset, size_t size,
     fprintf(stderr, "ERROR: Invalid size for migration area!\n");
     return -1;
   }
-  res = sigfillset(&mask);
+  for (int i = 0; i < migration_signals; i++) {
+      res = sigaddset(&mask, MIGRATION_SIGNAL+i);
   if (res < 0) {
-    perror("ERROR: Cannot fill signal mask while setting up locusta signal "
+    perror("ERROR: Cannot add migration signals to mask while setting up locusta signal "
            "handler\n");
     return res;
+  }
   }
   struct sigaction locusta_action = {
       .sa_mask = mask, .sa_sigaction = locusta_handler, .sa_flags = SA_SIGINFO};
@@ -284,7 +316,7 @@ int setup_migration(void *source, size_t offset, size_t size,
     printf("DEBUG: Setting up migration signals\n");
   }
   for (int i = 0;
-       i < DUMMY_SIGNALS + (SW_MODES * SW_DSTS) + (HW_MODES * HW_DSTS); i++) {
+       i < migration_signals; i++) {
     res = sigaction(MIGRATION_SIGNAL + i, &locusta_action, NULL);
     if (res < 0) {
       fprintf(stderr,
@@ -297,6 +329,8 @@ int setup_migration(void *source, size_t offset, size_t size,
   if (verbose > 0) {
     printf("DEBUG: migration setup done\n");
   }
+  current_setup_val=true;
+  __atomic_store(&setup_done,&current_setup_val, __ATOMIC_SEQ_CST);
   if (offset > 0) {
     if (verbose > 0) {
       printf("DEBUG: triggering premigration to 0x%lx\n", offset);
@@ -312,6 +346,12 @@ int setup_migration(void *source, size_t offset, size_t size,
 void destroy_migration_handler(void) {
   int res;
   sigset_t mask;
+  bool current_setup_val=false;
+  __atomic_load(&setup_done,&current_setup_val,__ATOMIC_SEQ_CST);
+  if (!current_setup_val) {
+      fprintf(stderr,"WARN: attempting to dsaible migration handler when not setup\n");
+      return;
+  }
   res = sigemptyset(&mask);
   if (res < 0) {
     perror("ERROR: Cannot empty signal mask while removing up locusta signal "

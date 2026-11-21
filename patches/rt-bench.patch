@@ -1,3 +1,15 @@
+diff --git a/generator/include/logging.h b/generator/include/logging.h
+index 68b9b79..e20368c 100644
+--- a/generator/include/logging.h
++++ b/generator/include/logging.h
+@@ -43,6 +43,7 @@ enum log_level {
+   LOG_LEVEL_TRACE, ///< Print informative messages on stdout and debug messages
+                    ///< on stderr.
+   LOG_LEVEL_DEBUG, ///< Print also debug messages.
++  LOG_LEVEL_MEM_TRACE, ///< Print tracing messages for allocations.
+   LOG_LEVEL_MAX    ///< Maximum log level. (Not a valid log level, used only for
+                    ///< validity checks)
+ };
 diff --git a/generator/include/memory_watcher.h b/generator/include/memory_watcher.h
 index 64c30ca..71079f4 100644
 --- a/generator/include/memory_watcher.h
@@ -18,24 +30,150 @@ index 64c30ca..71079f4 100644
 -#endif
 +#endif
 \ No newline at end of file
+diff --git a/generator/include/signal_utils.h b/generator/include/signal_utils.h
+index 80d815b..d4da2fb 100644
+--- a/generator/include/signal_utils.h
++++ b/generator/include/signal_utils.h
+@@ -18,13 +18,13 @@
+ #include <sys/wait.h>
+ 
+ /// The real-time signal that identifies the deadline occurrence.
+-#define SIGNAL_DEADLINE SIGRTMIN
++#define SIGNAL_DEADLINE SIGRTMAX
+ 
+ /// The real-time signal that identifies the end of the period.
+-#define SIGNAL_END_PERIOD SIGRTMIN + 1
++#define SIGNAL_END_PERIOD SIGRTMAX - 1
+ 
+ /// The real-time signal that identifies a new perf sample.
+-#define SIGNAL_PERF_SAMPLE SIGRTMIN + 2
++#define SIGNAL_PERF_SAMPLE SIGRTMAX - 2
+ 
+ #define SIGNAL_SYNCH_RELEASE SIGUSR1
+ 
 diff --git a/generator/rtbench.mk b/generator/rtbench.mk
-index 50c17b9..305b0c8 100644
+index 50c17b9..293a7a5 100644
 --- a/generator/rtbench.mk
 +++ b/generator/rtbench.mk
-@@ -21,7 +21,7 @@ RTBENCH_SRC_FLDR=$(RTBENCH_GENERATOR_DIR)/src
- override CFLAGS+=-Og -Wall -g -I$(RTBENCH_H_FLDR) -DGCC
+@@ -16,12 +16,14 @@ PROJ_ROOT=$(realpath $(RTBENCH_GENERATOR_DIR)/..)
+ RTBENCH_OBJ_FLDR=$(RTBENCH_GENERATOR_DIR)/object/$(notdir $(CROSS_COMPILE)$(CC))
+ RTBENCH_H_FLDR=$(RTBENCH_GENERATOR_DIR)/include
+ RTBENCH_SRC_FLDR=$(RTBENCH_GENERATOR_DIR)/src
++LOCUSTA_SRC_FLDR=$(realpath $(PROJ_ROOT)/../locusta_utils)
++PAGE_MIGRATION_SRC_FLDR=$(realpath $(PROJ_ROOT)/../page_migration)
+ 
+ # Basic compilation flags for rt-bench
+-override CFLAGS+=-Og -Wall -g -I$(RTBENCH_H_FLDR) -DGCC
++override CFLAGS+=-Og -Wall -g -I$(RTBENCH_H_FLDR) -DGCC -I$(PAGE_MIGRATION_SRC_FLDR) -I$(LOCUSTA_SRC_FLDR)
  
  # Add linker's flags
 -override LDFLAGS+=-lrt -lm -pthread  -Wl,--wrap=free -Wl,--wrap=malloc -Wl,--wrap=mmap
-+override LDFLAGS+=-lrt -lm -pthread  -Wl,--wrap=free -Wl,--wrap=malloc -Wl,--wrap=mmap -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=strdup
++override LDFLAGS+=-lrt -lm -pthread  -Wl,--wrap=free -Wl,--wrap=malloc -Wl,--wrap=mmap -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=strdup -L$(PAGE_MIGRATION_SRC_FLDR) -lpage_migration_lib
  
  #optional features
  
+@@ -166,13 +168,16 @@ endif
+ 
+ CXXFLAGS:=$(CFLAGS)
+ 
++LOCUSTA_SRC=$(shell find $(LOCUSTA_SRC_FLDR) -iname '*.c' -not -iname '*dlmalloc.c')
++PAGE_MIGRATION_SRC=$(shell find $(PAGE_MIGRATION_SRC_FLDR) -iname '*.c' -not -iname '*dlmalloc.c')
++
+ # Lists of all source files
+ # make sure that dlmalloc is there but only once, so we will automatically fetch the submodule
+-RTBENCH_SRC=$(shell find $(RTBENCH_SRC_FLDR) -name '*.c' -not -name 'dlmalloc.c') $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c
++RTBENCH_SRC=$(shell find $(RTBENCH_SRC_FLDR) -name '*.c' -not -name '*dlmalloc.c') $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c
+ # Lists of all object files
+-RTBENCH_O=$(addprefix $(RTBENCH_OBJ_FLDR)/,$(notdir $(RTBENCH_SRC:.c=.o)))
++RTBENCH_O=$(addprefix $(RTBENCH_OBJ_FLDR)/,$(notdir $(RTBENCH_SRC:.c=.o))) $(addprefix $(RTBENCH_OBJ_FLDR)/,$(notdir $(LOCUSTA_SRC:.c=.o))) $(addprefix $(RTBENCH_OBJ_FLDR)/,$(notdir $(PAGE_MIGRATION_SRC:.c=.o)))
+ # Lists of all header files
+-RTBENCH_H=$(shell find $(RTBENCH_H_FLDR) -name '*.h')
++RTBENCH_H=$(shell find $(RTBENCH_H_FLDR) -name '*.h') $(shell find $(LOCUSTA_SRC_FLDR) -name '*.h') $(shell find $(PAGE_MIGRATION_SRC_FLDR) -name '*.h')
+ 
+ # RT-Bench core dependencies
+ RTBENCH=$(PROJ_ROOT)/options.mk $(RTBENCH_OBJ_FLDR) $(RTBENCH_O) $(RTBENCH_H)
+@@ -204,6 +209,7 @@ else
+ staticx-check:
+ endif
+ 
++
+ $(PROJ_ROOT)/options.mk:
+ 		@touch $@
+ 
+@@ -215,9 +221,15 @@ $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c:
+ 	@cd $(PROJ_ROOT)
+ 	@git submodule update --init --recursive $(RTBENCH_SRC_FLDR)/dlmalloc
+ 
++$(RTBENCH_OBJ_FLDR)/%.o: $(LOCUSTA_SRC_FLDR)/%.c $(PROJ_ROOT)/options.mk
++	$(CROSS_COMPILE)$(CC) $(DLMALLOC_ALIGN) $(CFLAGS) -c $< -o $@ $(LDFLAGS)
++
++$(RTBENCH_OBJ_FLDR)/%.o: $(PAGE_MIGRATION_SRC_FLDR)/%.c $(PROJ_ROOT)/options.mk
++	$(CROSS_COMPILE)$(CC) $(DLMALLOC_ALIGN) $(CFLAGS) -c $< -o $@ $(LDFLAGS)
++
+ $(RTBENCH_OBJ_FLDR)/dlmalloc.o: $(RTBENCH_SRC_FLDR)/dlmalloc/source/dlmalloc.c $(PROJ_ROOT)/options.mk
+ 	@echo "setting up dlmalloc"
+-	git -C $(RTBENCH_SRC_FLDR)/dlmalloc apply ../dlmalloc.patch
++	git -C $(RTBENCH_SRC_FLDR)/dlmalloc apply --check --reverse ../dlmalloc.patch || git -C $(RTBENCH_SRC_FLDR)/dlmalloc apply ../dlmalloc.patch
+ 	$(CROSS_COMPILE)$(CC) $(DLMALLOC_ALIGN) $(CFLAGS) -c $< -o $@ $(LDFLAGS)
+ 
+ $(RTBENCH_OBJ_FLDR)/main.o: $(RTBENCH_SRC_FLDR)/main.c  $(RTBENCH_H) $(PROJ_ROOT)/options.mk
+diff --git a/generator/src/dlmalloc b/generator/src/dlmalloc
+--- a/generator/src/dlmalloc
++++ b/generator/src/dlmalloc
+@@ -1 +1 @@
+-Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3
++Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3-dirty
 diff --git a/generator/src/memory_watcher.c b/generator/src/memory_watcher.c
-index 1c2d310..99736d2 100644
+index 1c2d310..7451353 100644
 --- a/generator/src/memory_watcher.c
 +++ b/generator/src/memory_watcher.c
-@@ -165,8 +165,8 @@ static int translate_va(u64 vaddr) {
+@@ -25,6 +25,7 @@
+ #include <string.h>
+ #include <sys/mman.h>
+ #include <unistd.h>
++#include "locusta.h"
+ 
+ /// The mask used to extract the present bit from a page table entry.
+ #define PRES_MASK (1LL << 63)
+@@ -95,9 +96,9 @@ static struct memory_watcher_config {
+  * page frame number and the present bit.
+  */
+ static void print_map(u64 map) {
+-  elogf(LOG_LEVEL_DEBUG, "\t Raw: 0x%016llx\n", map);
+-  elogf(LOG_LEVEL_DEBUG, "\t PFN: 0x%016llx\n", map & PFN_MASK);
+-  elogf(LOG_LEVEL_DEBUG, "\t Present: %d\n", !!(map & PRES_MASK));
++  elogf(LOG_LEVEL_MEM_TRACE, "\t Raw: 0x%016llx\n", map);
++  elogf(LOG_LEVEL_MEM_TRACE, "\t PFN: 0x%016llx\n", map & PFN_MASK);
++  elogf(LOG_LEVEL_MEM_TRACE, "\t Present: %d\n", !!(map & PRES_MASK));
+ }
+ 
+ /**
+@@ -110,13 +111,13 @@ static void print_map(u64 map) {
+  * the page size is 4KB and each entry in the pagemap file is 8 bytes long.
+  * The page frame number is extracted from the pagemap entry and printed.
+  * The present bit is also printed.
+- * If the verbosity level is not `LOG_LEVEL_DEBUG` or the pagemap file has not
++ * If the verbosity level is not `LOG_LEVEL_MEM_TRACE` or the pagemap file has not
+  * been initialized, the function will return immediately.
+  */
+ static int translate_va(u64 vaddr) {
+   u64 map;
+ 
+-  if (benchmark_verbosity < LOG_LEVEL_DEBUG ||
++  if (benchmark_verbosity < LOG_LEVEL_MEM_TRACE ||
+       memory_watcher_config.pagemap_fd <= 0) {
+     return 0;
+   }
+@@ -132,7 +133,7 @@ static int translate_va(u64 vaddr) {
+     return -1;
+   }
+ 
+-  elogf(LOG_LEVEL_DEBUG, "pointer info:\n");
++  elogf(LOG_LEVEL_MEM_TRACE, "pointer info:\n");
+   print_map(map);
+ 
+   return 0;
+@@ -165,11 +166,10 @@ static int translate_va(u64 vaddr) {
   * bytes to setup its internal datastructures, so the maximum amount of
   * memory that latency can use would be ~1900KB.
   */
@@ -45,7 +183,10 @@ index 1c2d310..99736d2 100644
 +                           const char *heap_file) {
    int res;
    size_t page_size = sysconf(_SC_PAGESIZE);
-   void *dummy_alloc = NULL;
+-  void *dummy_alloc = NULL;
+   // correct value for the memory watcher to be enabled
+   enum memory_watcher_states expected_state = MEMORY_WATCHER_DISABLED,
+                              desired_state,
 @@ -194,12 +194,6 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
      if (__atomic_compare_exchange(&(memory_watcher_config.status),
                                    &expected_state, &initializing_state, false,
@@ -59,7 +200,7 @@ index 1c2d310..99736d2 100644
        // initialize mutex to 0, so other threads will need to wait for
        // initialization to be completed
        res = sem_init(&(memory_watcher_config.mutex), 0, 0);
-@@ -213,20 +207,14 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+@@ -213,20 +207,20 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
          elogf(LOG_LEVEL_TRACE,
                "Starting  memory watcher, bytes to preallocate: %zu.\n",
                heap_size);
@@ -67,26 +208,30 @@ index 1c2d310..99736d2 100644
 -        res = mallopt(M_TOP_PAD, heap_size);
 -        if (res == 0) {
 -          elogf(LOG_LEVEL_ERR, "Cannot preallocate %zu bytes.\n", heap_size);
--          exit(-1);
--        }
++        // create an anonymous mapping for the heap
++        memory_watcher_config.mapping = (mem_watcher_address_t *)mmap(
++            NULL, heap_size, PROT_READ | PROT_WRITE,
++            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++        if (memory_watcher_config.mapping == MAP_FAILED) {
++          perror("Cannot mmap  heap to private location, aborting.\n");
+           exit(-1);
+         }
 -        // a dummy allocation to have malloc preallocate the requested amount of
 -        // memory.
 -        dummy_alloc = malloc(heap_size);
 -        if (dummy_alloc == NULL) {
 -          elogf(LOG_LEVEL_ERR, "Cannot allocate dynamic memory, aborting.\n");
-+        // create an anonymous mapping for the heap
-+        memory_watcher_config.mapping = (mem_watcher_address_t *)mmap(
-+            NULL, heap_size, PROT_READ | PROT_WRITE,
-+            MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
-+        if (memory_watcher_config.mapping == MAP_FAILED) {
-+          perror("Cannot mmap  heap to private location, aborting.\n");
++				elogf(LOG_LEVEL_INFO,"setting up migration handler\n");
++				res=setup_migration(memory_watcher_config.mapping,(size_t)heap_start,heap_size/getpagesize(),0);
++				if (res < 0) {
            exit(-1);
          }
 -        free(dummy_alloc);
++				elogf(LOG_LEVEL_INFO,"migration handler ready\n");
        } else {
          // open the file that will back the heap
          memory_watcher_config.heap_fd = open(heap_file, O_RDWR);
-@@ -238,7 +226,7 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+@@ -238,7 +232,7 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
          // map a region of `/dev/dem`, starting from `heap_start` and of size
          // `heap_size`
  
@@ -95,7 +240,7 @@ index 1c2d310..99736d2 100644
          // Considering we are addressing `/dev/mem` which has a view of all the
          // physical memory this is conceptually sound. This could create
          // problems with fixed heap sizes and memory that is not 1 byte
-@@ -253,20 +241,19 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+@@ -253,20 +247,19 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
          if (memory_watcher_config.mapping == MAP_FAILED) {
            perror("Cannot mmap heap file to fix heap location, aborting.\n");
            close(memory_watcher_config.heap_fd);
@@ -119,10 +264,12 @@ index 1c2d310..99736d2 100644
        memory_watcher_config.heap_size = heap_size;
        memory_watcher_config.initial_program_break =
            (mem_watcher_address_t *)sbrk(0);
-@@ -283,6 +270,17 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+@@ -282,6 +275,18 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+         perror("Cannot find the program break during memory "
                 "watcher setup.");
          exit(-1);
-       }
++      }
++			memset(memory_watcher_config.mapping,0,heap_size);
 +      // disable mmap usage
 +      res = mallopt(M_MMAP_MAX, 0);
 +      if (res == 0) {
@@ -133,11 +280,20 @@ index 1c2d310..99736d2 100644
 +      if (res < 0) {
 +        perror("Cannot lock memory watcher preallocated memory");
 +        exit(-1);
-+      }
+       }
        res = sem_post(&(memory_watcher_config.mutex));
        if (res < 0) {
-         perror("Cannot post on memory watcher mutex during init");
-@@ -323,6 +321,7 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+@@ -315,14 +320,15 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+   }
+   // open the pagemap file to translate virtual addresses to physical
+   // ones
+-  if (benchmark_verbosity >= LOG_LEVEL_DEBUG) {
+-    elogf(LOG_LEVEL_DEBUG, "Opening pagemap file.\n");
++  if (benchmark_verbosity >= LOG_LEVEL_MEM_TRACE) {
++    elogf(LOG_LEVEL_MEM_TRACE, "Opening pagemap file.\n");
+     memory_watcher_config.pagemap_fd = open("/proc/self/pagemap", O_RDONLY);
+     if (memory_watcher_config.pagemap_fd < 0) {
+       perror("Unable to open pagemap file");
        exit(-1);
      }
    }
@@ -145,10 +301,40 @@ index 1c2d310..99736d2 100644
  }
  
  /**
-@@ -452,28 +451,6 @@ void *__wrap_malloc(size_t size) {
+@@ -341,6 +347,7 @@ void stop_memory_watcher() {
+   __atomic_exchange(&(memory_watcher_config.status), &disabled_status,
+                     &current_status, __ATOMIC_SEQ_CST);
+   if (current_status >= MEMORY_WATCHER_ENABLED) {
++	destroy_migration_handler();
+     res = sem_getvalue(&(memory_watcher_config.mutex), &semval);
+     if (res < 0) {
+       perror("Cannot get memory watcher mutex value during teardown (1st)");
+@@ -423,8 +430,8 @@ extern void *dlmalloc(size_t size);
+  */
+ void *__wrap_malloc(size_t size) {
+   int res;
+-  elogf(LOG_LEVEL_DEBUG, "wapper malloc with size %zu\n", size);
+-  void *pointer = NULL, *current_program_break = NULL;
++  elogf(LOG_LEVEL_MEM_TRACE, "wapper malloc with size %zu\n", size);
++  void *pointer = NULL;
+   enum memory_watcher_states current_status;
+   __atomic_load(&(memory_watcher_config.status), &current_status,
+                 __ATOMIC_SEQ_CST);
+@@ -443,38 +450,16 @@ void *__wrap_malloc(size_t size) {
+                                 ? dlmalloc
+                                 : __real_malloc;
+ 
+-  elogf(LOG_LEVEL_DEBUG, "wrapped malloc mem watcher config status:%d \n",
++  elogf(LOG_LEVEL_MEM_TRACE, "wrapped malloc mem watcher config status:%d \n",
+         memory_watcher_config.status);
+-  elogf(LOG_LEVEL_DEBUG,
++  elogf(LOG_LEVEL_MEM_TRACE,
+         "wrapped malloc \t real_malloc address: %p, dlmalloc %p, selected: %s "
+         "(%p)\n",
+         __real_malloc, dlmalloc,
          (malloc == __real_malloc) ? "real_malloc" : "dlmalloc", malloc);
    pointer = (malloc)(size);
-   elogf(LOG_LEVEL_DEBUG, "Allocation done at: %p\n", pointer);
+-  elogf(LOG_LEVEL_DEBUG, "Allocation done at: %p\n", pointer);
 -  if (current_status == MEMORY_WATCHER_ENABLED) {
 -    current_program_break = sbrk(0);
 -    if (current_program_break == (void *)-1) {
@@ -171,10 +357,22 @@ index 1c2d310..99736d2 100644
 -      return NULL;
 -    }
 -  }
-   elogf(LOG_LEVEL_DEBUG, "wapper malloc done with pointer %p\n", pointer);
+-  elogf(LOG_LEVEL_DEBUG, "wapper malloc done with pointer %p\n", pointer);
++  elogf(LOG_LEVEL_MEM_TRACE, "Allocation done at: %p\n", pointer);
++  elogf(LOG_LEVEL_MEM_TRACE, "wapper malloc done with pointer %p\n", pointer);
    if (translate_va((u64)pointer) < 0) {
      elogf(LOG_LEVEL_ERR, "Cannot translate pointer %p\n", pointer);
-@@ -528,6 +505,7 @@ void *rtbench_sbrk(intptr_t offset) {
+     sem_post(&(memory_watcher_config.mutex));
+@@ -520,7 +505,7 @@ void *__wrap_mmap(void *addr, size_t len, int prot, int flags, int fildes,
+  * only be called by our wrapped malloc / free, inside their critical section.
+  */
+ void *rtbench_sbrk(intptr_t offset) {
+-  elogf(LOG_LEVEL_DEBUG,
++  elogf(LOG_LEVEL_MEM_TRACE,
+         "wrapped sbrk with offset %ld, memory watcher status: %d\n", offset,
+         memory_watcher_config.status);
+   void *pointer = NULL;
+@@ -528,6 +513,7 @@ void *rtbench_sbrk(intptr_t offset) {
    __atomic_load(&(memory_watcher_config.status), &current_status,
                  __ATOMIC_SEQ_CST);
    switch (current_status) {
@@ -182,7 +380,22 @@ index 1c2d310..99736d2 100644
    case MEMORY_WATCHER_FILE_HEAP:
    case MEMORY_WATCHER_FIXED_HEAP:
      // with a positive increment we need to check if the new program break is
-@@ -566,20 +544,6 @@ void *rtbench_sbrk(intptr_t offset) {
+@@ -550,7 +536,7 @@ void *rtbench_sbrk(intptr_t offset) {
+     pointer = memory_watcher_config.fixed_heap_program_break;
+     memory_watcher_config.fixed_heap_program_break +=
+         offset; // modify the current program break
+-    elogf(LOG_LEVEL_DEBUG, "wrapped sbrk new program break %p\n",
++    elogf(LOG_LEVEL_MEM_TRACE, "wrapped sbrk new program break %p\n",
+           memory_watcher_config.fixed_heap_program_break);
+     break;
+   case MEMORY_WATCHER_DISABLED:
+@@ -561,25 +547,11 @@ void *rtbench_sbrk(intptr_t offset) {
+     pointer = (void *)-1;
+     break;
+   case MEMORY_WATCHER_INITIALIZING:
+-    elogf(LOG_LEVEL_DEBUG,
++    elogf(LOG_LEVEL_MEM_TRACE,
+           "Usage of rtbench_sbrk() to change program break size during "
            "memory watcher initialization, allowed.");
      pointer = sbrk(offset);
      break;
@@ -203,10 +416,31 @@ index 1c2d310..99736d2 100644
    default:
      elogf(LOG_LEVEL_ERR, "Invalid memory watcher status: %d.\n",
            memory_watcher_config.status);
-@@ -642,4 +606,129 @@ void __wrap_free(void *ptr) {
-     }
-     elogf(LOG_LEVEL_DEBUG, "wrapped free done\n");
+@@ -588,7 +560,7 @@ void *rtbench_sbrk(intptr_t offset) {
+     break;
    }
+ 
+-  elogf(LOG_LEVEL_DEBUG, "wrapped sbrk done pointer:%p\n", pointer);
++  elogf(LOG_LEVEL_MEM_TRACE, "wrapped sbrk done pointer:%p\n", pointer);
+   if (translate_va((u64)memory_watcher_config.fixed_heap_program_break) < 0) {
+     elogf(LOG_LEVEL_ERR, "Cannot translate pointer %p\n", pointer);
+     exit(-1);
+@@ -612,7 +584,7 @@ extern void dlfree(void *ptr);
+ void __wrap_free(void *ptr) {
+   enum memory_watcher_states current_status;
+   int res;
+-  elogf(LOG_LEVEL_DEBUG, "wrapped free for %p\n", ptr);
++  elogf(LOG_LEVEL_MEM_TRACE, "wrapped free for %p\n", ptr);
+   if (translate_va((u64)ptr) < 0) {
+     elogf(LOG_LEVEL_ERR, "Cannot translate pointer %p\n", ptr);
+     exit(-1);
+@@ -640,6 +612,131 @@ void __wrap_free(void *ptr) {
+       perror("Cannot post on memory watcher mutex during malloc");
+       exit(-1);
+     }
+-    elogf(LOG_LEVEL_DEBUG, "wrapped free done\n");
++    elogf(LOG_LEVEL_MEM_TRACE, "wrapped free done\n");
++  }
 +}
 +
 +/// The symbol that corresponds to the real `calloc()`, after the linker has
@@ -220,9 +454,9 @@ index 1c2d310..99736d2 100644
 +/// Make calloc behave the same but use the wrapped malloc got get memory
 +void *__wrap_calloc(size_t n, size_t size) {
 +  int res;
-+  elogf(LOG_LEVEL_DEBUG, "wapper calloc with item number %zu size %zu\n", n,
++  elogf(LOG_LEVEL_MEM_TRACE, "wapper calloc with item number %zu size %zu\n", n,
 +        size);
-+  void *pointer = NULL, *current_program_break = NULL;
++  void *pointer = NULL;
 +  enum memory_watcher_states current_status;
 +  __atomic_load(&(memory_watcher_config.status), &current_status,
 +                __ATOMIC_SEQ_CST);
@@ -241,15 +475,15 @@ index 1c2d310..99736d2 100644
 +      (current_status >= MEMORY_WATCHER_INITIALIZING) ? dlcalloc
 +                                                      : __real_calloc;
 +
-+  elogf(LOG_LEVEL_DEBUG, "wrapped calloc mem watcher config status:%d \n",
++  elogf(LOG_LEVEL_MEM_TRACE, "wrapped calloc mem watcher config status:%d \n",
 +        memory_watcher_config.status);
-+  elogf(LOG_LEVEL_DEBUG,
++  elogf(LOG_LEVEL_MEM_TRACE,
 +        "wrapped calloc \t real_calloc address: %p, dlcalloc %p, selected: %s "
 +        "(%p)\n",
 +        __real_calloc, dlcalloc,
 +        (calloc == __real_calloc) ? "real_calloc" : "dlcalloc", calloc);
 +  pointer = (calloc)(n, size);
-+  elogf(LOG_LEVEL_DEBUG, "Allocation done at: %p\n", pointer);
++  elogf(LOG_LEVEL_MEM_TRACE, "Allocation done at: %p\n", pointer);
 +  if (translate_va((u64)pointer) < 0) {
 +    elogf(LOG_LEVEL_ERR, "Cannot translate pointer %p\n", pointer);
 +    sem_post(&(memory_watcher_config.mutex));
@@ -276,8 +510,8 @@ index 1c2d310..99736d2 100644
 +/// Make calloc behave the same but use the wrapped malloc got get memory
 +void *__wrap_realloc(void *p, size_t size) {
 +  int res;
-+  elogf(LOG_LEVEL_DEBUG, "wapper realloc with pointer %p size %zu\n", p, size);
-+  void *pointer = NULL, *current_program_break = NULL;
++  elogf(LOG_LEVEL_MEM_TRACE, "wapper realloc with pointer %p size %zu\n", p, size);
++  void *pointer = NULL;
 +  enum memory_watcher_states current_status;
 +  __atomic_load(&(memory_watcher_config.status), &current_status,
 +                __ATOMIC_SEQ_CST);
@@ -296,16 +530,16 @@ index 1c2d310..99736d2 100644
 +      (current_status >= MEMORY_WATCHER_INITIALIZING) ? dlrealloc
 +                                                      : __real_realloc;
 +
-+  elogf(LOG_LEVEL_DEBUG, "wrapped realloc mem watcher config status:%d \n",
++  elogf(LOG_LEVEL_MEM_TRACE, "wrapped realloc mem watcher config status:%d \n",
 +        memory_watcher_config.status);
 +  elogf(
-+      LOG_LEVEL_DEBUG,
++      LOG_LEVEL_MEM_TRACE,
 +      "wrapped realloc \t real_realloc address: %p, dlrealloc %p, selected: %s "
 +      "(%p)\n",
 +      __real_realloc, dlrealloc,
 +      (realloc == __real_realloc) ? "real_realloc" : "dlrealloc", realloc);
 +  pointer = (realloc)(p, size);
-+  elogf(LOG_LEVEL_DEBUG, "Allocation done at: %p\n", pointer);
++  elogf(LOG_LEVEL_MEM_TRACE, "Allocation done at: %p\n", pointer);
 +  if (translate_va((u64)pointer) < 0) {
 +    elogf(LOG_LEVEL_ERR, "Cannot translate pointer %p\n", pointer);
 +    sem_post(&(memory_watcher_config.mutex));
@@ -330,7 +564,33 @@ index 1c2d310..99736d2 100644
 +  char *newstr = __wrap_calloc(len + 1, sizeof(char));
 +  if (newstr != NULL) {
 +    strcpy(newstr, s);
-+  }
+   }
 +  return newstr;
  }
 \ No newline at end of file
+diff --git a/generator/src/parsing.c b/generator/src/parsing.c
+index e62e37a..aef7e14 100644
+--- a/generator/src/parsing.c
++++ b/generator/src/parsing.c
+@@ -263,14 +263,13 @@ int interpret_opt(int key, const char *arg, struct argp_state *state) {
+     break;
+   case 'H':
+     if (arg != NULL) {
++        parsed_args->heap_address = (void *)strtoull(arg, NULL, 0);
+       if (arg[0] == '0' && arg[1] == 'x') {
+         elogf(LOG_LEVEL_TRACE, "using /dev/mem to back the heap\n");
+-        parsed_args->heap_address = (void *)strtoull(arg, NULL, 0);
+         parsed_args->heap_file_path = "/dev/mem";
+       } else {
+         elogf(LOG_LEVEL_TRACE, "using %s to back the heap\n", arg);
+         parsed_args->heap_file_path = arg;
+-        parsed_args->heap_address = NULL;
+       }
+     }
+     if (res < 0 || errno != 0) {
+diff --git a/image-filters b/image-filters
+--- a/image-filters
++++ b/image-filters
+@@ -1 +1 @@
+-Subproject commit 6763925e5af0ba108ec40fbaa8568b210a05e580
++Subproject commit 6763925e5af0ba108ec40fbaa8568b210a05e580-dirty

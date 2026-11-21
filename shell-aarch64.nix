@@ -27,6 +27,8 @@ pkgs-cross.mkShell {
     zeromq
     pkgs-cross.stdenv.cc
     pkgs-cross.stdenv.cc.bintools
+    uv
+    bazelisk
     treefmt
   ];
 

@@ -29,7 +29,6 @@ static inline void help(char *name) {
 
 int main(int argc, char **argv) {
   char* output_filename="interrupts.log";
-  bool wait_for_target_termination=false;
   int num_signals_to_send = 0, *signals_to_send = NULL, period_id = 0;
   pid_t target = 0;
   int res, opt, recv_sig = 0;
@@ -54,9 +53,6 @@ int main(int argc, char **argv) {
   do {
     opt = getopt(argc, argv, "-ht:s:d:p:vf:");
     switch (opt) {
-    case 'w':
-      wait_for_target_termination=true;
-      break;
     case 'v':
       verbose++;
       break;
