@@ -222,10 +222,21 @@ index 43b249080a2..579b4864c8a 100644
  }  // namespace benchmark
  }  // namespace tflite
 diff --git a/tensorflow/lite/tools/benchmark/benchmark_model.cc b/tensorflow/lite/tools/benchmark/benchmark_model.cc
-index 27dd3de3e3b..19ecb5f580d 100644
+index 27dd3de3e3b..57046d1fa44 100644
 --- a/tensorflow/lite/tools/benchmark/benchmark_model.cc
 +++ b/tensorflow/lite/tools/benchmark/benchmark_model.cc
-@@ -222,7 +222,10 @@ StatWithPercentiles<int64_t> BenchmarkModel::Run(int min_num_times,
+@@ -31,6 +31,10 @@ limitations under the License.
+ #include "tensorflow/lite/tools/benchmark/benchmark_utils.h"
+ #include "tensorflow/lite/tools/logging.h"
+ 
++extern "C" {
++    #include "tensorflow/lite/locusta/locusta.h"
++}
++
+ namespace tflite {
+ namespace benchmark {
+ using tensorflow::StatWithPercentiles;
+@@ -222,7 +226,10 @@ StatWithPercentiles<int64_t> BenchmarkModel::Run(int min_num_times,
                                                   float min_secs, float max_secs,
                                                   RunType run_type,
                                                   TfLiteStatus* invoke_status) {
@@ -237,7 +248,16 @@ index 27dd3de3e3b..19ecb5f580d 100644
    TFLITE_LOG(INFO) << "Running benchmark for at least " << min_num_times
                     << " iterations and at least " << min_secs << " seconds but"
                     << " terminate if exceeding " << max_secs << " seconds.";
-@@ -254,6 +257,7 @@ StatWithPercentiles<int64_t> BenchmarkModel::Run(int min_num_times,
+@@ -236,6 +243,8 @@ StatWithPercentiles<int64_t> BenchmarkModel::Run(int min_num_times,
+   double manual_inter_run_gap = 1.0 / run_frequency;
+   // float doesn't have sufficient precision for storing this number
+   double next_run_finish_time = now_us * 1e-6 + manual_inter_run_gap;
++
++  start_periodic_migration_tool();
+   for (int run = 0; (run < min_num_times || now_us < min_finish_us) &&
+                     now_us <= max_finish_us;
+        run++) {
+@@ -254,6 +263,7 @@ StatWithPercentiles<int64_t> BenchmarkModel::Run(int min_num_times,
      }
  #endif
      run_stats.UpdateStat(run_duration_us);
@@ -245,7 +265,7 @@ index 27dd3de3e3b..19ecb5f580d 100644
      if (run_frequency > 0) {
        inter_run_sleep_time =
            next_run_finish_time - profiling::time::NowMicros() * 1e-6;
-@@ -271,6 +275,7 @@ StatWithPercentiles<int64_t> BenchmarkModel::Run(int min_num_times,
+@@ -271,6 +281,7 @@ StatWithPercentiles<int64_t> BenchmarkModel::Run(int min_num_times,
  
    std::stringstream stream;
    run_stats.OutputToStream(&stream);

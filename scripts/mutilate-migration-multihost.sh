@@ -13,15 +13,15 @@ script_dir="$(
 
 ssh_target=$4
 server_ip=${ssh_target##*@}
-mutilate_agents_ip=("127.0.0.1" "10.210.1.170" "10.210.1.205" "10.210.1.162" "10.210.1.213")
-mutilate_agent_users=("mattia" "root" "root" "mnico" "mnico")
+#mutilate_agents_ip=( "10.210.1.170" "10.210.1.205" "10.210.1.162" "10.210.1.213")
+mutilate_agents_ip=( "10.210.1.170" "10.210.1.205")
+mutilate_agent_users=("root" "root" "mnico" "mnico")
 mutilate_num_agents=${#mutilate_agents_ip[@]}
 mutilate_agent_port=5556
+mutilate_master_threads=$(nproc)
 if [[ $mutilate_num_agents -gt 0 ]]; then
-    mutilate_master_threads=16
-    mutilate_args="-B -R -D 64 -C 4"
+    mutilate_args="-D 64 -C 4"
 else
-    mutilate_master_threads=$(nproc)
     mutilate_args=""
 fi
 ramdisk_path=/tmp/memcached_ramdisk
@@ -42,7 +42,7 @@ mode=${rest#*-}
 mutilate_pwd="$script_dir/../test/mutilate-eric/mutilate"
 mutilate_output_file="$dir/$experiment.log"
 mutilate_stats_file="$dir/${experiment}_stats.txt"
-mutilate_exec_params="-d 64 -c 4 -q 200000 -i fb_ia -K fb_key -V fb_value -u 0.2 -r 100000"
+mutilate_exec_params="-d 4 -c 16 -q 500000 -i fb_ia -K 128 -V 10 -u 0.2 -r 1000000"
 
 ssh "$ssh_target" "touch $ramdisk_path && truncate -s ${mem_file_size}M $ramdisk_path"
 
@@ -147,13 +147,13 @@ esac
 dst_signal_id=$(echo "$engine_id + ($dst_id * $dst_modes) + $mode_id" | bc)
 src_signal_id=$(echo "$engine_id + ($src_id * $dst_modes) + $mode_id" | bc)
 migration_period=$(echo "$mutilate_runtime/5" | bc)
-migration_delay=$(echo "$mutilate_init_time + $mutilate_warmup_time + $migration_period+1" | bc)
+migration_delay=$(echo "$mutilate_init_time + $mutilate_warmup_time + $migration_period+2" | bc)
 mkdir -p "$dir"
 set -x
 ssh "$ssh_target" mkdir -p "$nfs_data_dir"
 echo "Chosen migration signal dst:$dst_signal_id src:$src_signal_id"
 #shellcheck disable=SC2086
-ssh "$ssh_target" /usr/bin/time -v "$nfs_exec_dir"/memcached -c 32768 -u root -t 3 $memcached_args 2>"$dir/memcached_util.log" &
+ssh "$ssh_target" /usr/bin/time -v "$nfs_exec_dir"/memcached -c 32768 -u root -t 1 $memcached_args 2>"$dir/memcached_util.log" &
 #ssh "$ssh_target" "$nfs_exec_dir"/start_memcached.sh -t 2 -c 32768 $memcached_args 2> "$dir/memcached_util.log" &
 set +x
 sleep 1
@@ -166,13 +166,13 @@ if [[ $mutilate_num_agents -gt 0 ]]; then
     echo "Starting agents"
     for ((i = 0; i < mutilate_num_agents; i++)); do
         set -x
-        if ! ssh "${mutilate_agent_users[i]}@${mutilate_agents_ip[i]}" test -f ./mutilate ; then
+        ssh "${mutilate_agent_users[i]}@${mutilate_agents_ip[i]}" rm -f mutilate
         scp $mutilate_pwd "${mutilate_agent_users[i]}@${mutilate_agents_ip[i]}:"
+        if ssh "${mutilate_agent_users[i]}@${mutilate_agents_ip[i]}" pgrep mutilate; then
+            ssh "${mutilate_agent_users[i]}@${mutilate_agents_ip[i]}" pkill mutilate
         fi
-        if ! ssh "${mutilate_agent_users[i]}@${mutilate_agents_ip[i]}" pgrep mutilate; then
-        ssh "${mutilate_agent_users[i]}@${mutilate_agents_ip[i]}" ./mutilate  \
+        ssh "${mutilate_agent_users[i]}@${mutilate_agents_ip[i]}" ./mutilate -v  \
             -T '$(nproc)' -p $mutilate_agent_port -A &
-        fi
         set +x
         mutilate_args="$mutilate_args -a ${mutilate_agents_ip[i]}"
     done
@@ -182,7 +182,8 @@ else
 fi
 # load db
 set -x
-$mutilate_pwd $mutilate_exec_params --loadonly --server="$server_ip"
+$mutilate_pwd $mutilate_exec_params -w $mutilate_warmup_time --loadonly --server="$server_ip"
+sleep 2
 set +x
 # start mutilate master, connect to agents and start issuing requests
 echo "DB loaded, starting experiment"
@@ -207,7 +208,7 @@ else
     ssh "$ssh_target" "$nfs_exec_dir"/dump_time "$nfs_data_dir/mutilate_start.log"
     set -x
     #shellcheck disable=SC2086
-    $mutilate_pwd --save="$mutilate_output_file" $mutilate_args >"$mutilate_stats_file"
+    $mutilate_pwd -v --save="$mutilate_output_file" $mutilate_args >"$mutilate_stats_file"
     set +x
 fi
 if [[ ! "$engine" =~ ^baseline ]] && [[ "$engine" != "warmup" ]]; then

@@ -54,6 +54,7 @@ tflite: $(TF_SRC_FLDR)/bazel-bin/tensorflow/lite/tools/benchmark/benchmark_model
 $(TF_SRC_FLDR)/bazel-bin/tensorflow/lite/tools/benchmark/benchmark_model: $(TF_LOCUSTA_SRC_FLDR) $(TF_SRC_FLDR)/README.md $(shell find $(LOCUSTA_SRC_FLDR) -iname '*.c' -or -iname "*.h") $(shell find $(PAGE_MIGRATION_SRC_FLDR) -iname '*.c' -or -iname '*.h' -or -iname '*.a')
 	-git -C $(PATCH_FLDR) apply $(PATCH_FLDR)/tensorflow.patch
 	cd $(TF_SRC_FLDR) && bazelisk build -c opt --config=monolithic --config=elinux_aarch64 //tensorflow/lite/tools/benchmark:benchmark_model
+	chmod +w $(TF_SRC_FLDR)/bazel-bin/tensorflow/lite/tools/benchmark/benchmark_model
 
 $(MEMCACHED_SRC_FLDR)/README.md:
 	git submodule update --init $(MEMCACHED_SRC_FLDR)
@@ -106,8 +107,9 @@ ifneq ($(SERVER),)
 endif
 
 rt-bench-nfs: rt-bench test
-	mkdir -p $(NFS_TARGET_FLDR)/rtbench/canny
+	mkdir -p $(NFS_TARGET_FLDR)/rtbench/canny $(NFS_TARGET_FLDR)/rtbench
 	cp $(RTBENCH_SRC_FLDR)/image-filters/canny $(NFS_TARGET_FLDR)/rtbench/canny/
+	cp $(RTBENCH_SRC_FLDR)/IsolBench/bandwidth $(NFS_TARGET_FLDR)/rtbench/bandwidth
 	cp $(RTBENCH_SRC_FLDR)/image-filters/inputs/{4k,fullhd,vga}.bmp $(NFS_TARGET_FLDR)/rtbench/canny/
 	cp $(MIGRATION_SRC_FLDR)/periodic_migration $(NFS_TARGET_FLDR)/rtbench/periodic_migration
 

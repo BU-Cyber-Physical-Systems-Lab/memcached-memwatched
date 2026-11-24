@@ -3,10 +3,12 @@
 #include "at_intf_user.h"
 #include <errno.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <inttypes.h>
 
 /// Size of the migration in pages
 static size_t heap_size_pages = -1;
@@ -50,7 +52,13 @@ select_dst_from_addr(enum migration_engine engine, size_t addr) {
     return NULL;
   }
   for (int i = 0; i < dsts_len; i++) {
+      if (verbose > 0) {
+         fprintf(stderr,"DEBUG: looking at destination %d: id %d name:%s engine %d size: %lx, start 0x%lx\n",i,dsts[i].id,dsts[i].name,dsts[i].engine,dsts[i].size,dsts[i].start);
+    }
     if (dsts[i].start == addr) {
+      if (verbose > 0) {
+         fprintf(stderr,"DEBUG: selected destination %d, %s, id %d\n",i,dsts[i].name,dsts[i].id);
+    }
       return dsts + i;
     }
   }
@@ -72,7 +80,7 @@ static inline int trigger_migration(struct migration_dst dst,
   bool expected_migration_status=false,desired_migration_status=true;
   union at_response response={0};
   if (!setup_done) {
-    fprintf(stderr, "ERROR: Migration triggered before setup commpleted!\n");
+    fprintf(stderr, "ERROR: Migration triggered before setup completed!\n");
     return -1;
   }
   if (migration_source == NULL) {
@@ -96,10 +104,11 @@ static inline int trigger_migration(struct migration_dst dst,
   } else {
     migration_size = heap_size_pages - 1;
   }
+  migration_size=1023;
   if(verbose>0){
     at_intf_translate((uint64_t) migration_source, 0, &response);
     if(response.success.f==0){
-      printf("DEBUG: PA PFN before migration: 0x%lx\n",response.success.pa_pfn);
+        fprintf(stderr,"DEBUG: VA before migration %p, PA PFN before migration: 0x%"PRIx64"\n",migration_source,(uint64_t)response.success.pa_pfn);
     }else{
       printf("WARNING: Migration check failed!\n");
     }
@@ -108,16 +117,16 @@ static inline int trigger_migration(struct migration_dst dst,
     printf(
         "DEBUG: heap size %lu destination size %lu chosen migration size %lu\n",
         heap_size_pages, dst.size / getpagesize(), migration_size);
-    printf("DEBUG: migrating pages to destination %d (start at 0x%lx) with "
+    fprintf(stderr,"DEBUG: migrating pages from %p to destination %d (start at 0x%lx) with "
            "size %lu\n",
-           dst_id, dst.start, migration_size);
+           migration_source,dst_id, dst.start, migration_size);
   }
   res = migrate_pages_to_dst(migration_source, migration_size, engine, dst_id,
                              mode);
   if(verbose>0){
     at_intf_translate((uint64_t) migration_source, 0, &response);
     if(response.success.f==0){
-      printf("DEBUG: PA PFN after migration: 0x%lx\n",response.success.pa_pfn);
+      fprintf(stderr,"DEBUG: VA after migration %p, PA PFN after migration: 0x%"PRIx64"\n",migration_source,(uint64_t)response.success.pa_pfn);
     }else{
       printf("WARNING: Migration check failed!\n");
     }
@@ -159,12 +168,12 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
     return;
   }
   if (verbose > 0) {
-    printf("DEBUG: signal offset is %d\n", signal_offset);
+    fprintf(stderr,"DEBUG: signal offset is %d\n", signal_offset);
   }
   // 0 to DUMMY_SIGNALS -1 -> we fake the migration
   if (signal_offset < DUMMY_SIGNALS) {
     if (verbose > 0) {
-      printf("DEBUG: selected DUMMY handler\n");
+      fprintf(stderr,"DEBUG: selected DUMMY handler\n");
     }
     return;
   } else {
@@ -178,25 +187,25 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
       switch (signal_offset % selected_modes) {
       case 0:
         if (verbose > 0) {
-          printf("DEBUG: selected SW SYNC migration\n");
+          fprintf(stderr,"DEBUG: selected SW SYNC migration\n");
         }
         mode = MIGRATION_MODE_SYNC;
         break;
       case 1:
         if (verbose > 0) {
-          printf("DEBUG: selected SW SYNC LIGHT migration\n");
+          fprintf(stderr,"DEBUG: selected SW SYNC LIGHT migration\n");
         }
         mode = MIGRATION_MODE_SYNC_LIGHT;
         break;
       case 2:
         if (verbose > 0) {
-          printf("DEBUG: selected SW SYNC NO COPY migration\n");
+          fprintf(stderr,"DEBUG: selected SW SYNC NO COPY migration\n");
         }
         mode = MIGRATION_MODE_SYNC_NO_COPY;
         break;
       case 3:
         if (verbose > 0) {
-          printf("DEBUG: selected SW ASYNC migration\n");
+          fprintf(stderr,"DEBUG: selected SW ASYNC migration\n");
         }
         mode = MIGRATION_MODE_ASYNC;
         break;
@@ -217,7 +226,7 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
         switch (signal_offset % selected_modes) {
         case 0:
           if (verbose > 0) {
-            printf("DEBUG: selected HW ASYNC migration\n");
+            fprintf(stderr,"DEBUG: selected HW ASYNC migration\n");
           }
           mode = MIGRATION_MODE_ASYNC;
           break;
@@ -239,6 +248,9 @@ static void locusta_handler(int sig, siginfo_t *info, void *ucontext) {
   // the signal offset
   if (signal_offset / selected_modes < selected_dsts_len) {
     selected_dst = selected_dsts[signal_offset / selected_dsts_len];
+    if (verbose > 0) {
+    fprintf(stderr, "DEBUG: Selected destination %lu, %s id %d\n",signal_offset / selected_dsts_len,selected_dst.name,selected_dst.id);
+    }
   } else {
     fprintf(stderr, "ERROR: Invalid migration destination for mode %d\n", mode);
     return;
@@ -263,7 +275,7 @@ int setup_migration(void *source, size_t offset, size_t size,
     int migration_signals=DUMMY_SIGNALS + (SW_MODES * SW_DSTS) + (HW_MODES * HW_DSTS);
   verbose = verbose_level;
   if (verbose > 0) {
-        fprintf(stderr,"DEBUG: migration source addr %p, offset %lu, size: %lu\n",source,offset,size);
+        fprintf(stderr,"DEBUG: migration source addr %p, offset 0x%lx, size: %lu\n",source,offset,size);
   }
   __atomic_load(&setup_done,&current_setup_val,__ATOMIC_SEQ_CST);
   if (current_setup_val) {
@@ -271,7 +283,7 @@ int setup_migration(void *source, size_t offset, size_t size,
     return -1;
   }
   sigset_t mask;
-  if (SIGRTMIN + migration_signals > SIGRTMAX -2 ) {
+  if (MIGRATION_SIGNAL + migration_signals > SIGRTMAX -2 ) {
     fprintf(stderr, "ERROR: more migration signals (%d) than the ones between SIGRTMIN (%d) and SIGRTMAX (%d) (%d >+ %d)!\n",migration_signals,SIGRTMIN,SIGRTMAX,SIGRTMIN + migration_signals,SIGRTMAX);
     return -1;
   }
@@ -313,7 +325,7 @@ int setup_migration(void *source, size_t offset, size_t size,
   if (verbose > 0) {
     printf("HW destinations for migration:\n");
     print_destinations(hw_dsts, hw_dsts_count);
-    printf("DEBUG: Setting up migration signals\n");
+    fprintf(stderr,"DEBUG: Setting up migration signals\n");
   }
   for (int i = 0;
        i < migration_signals; i++) {
@@ -327,20 +339,47 @@ int setup_migration(void *source, size_t offset, size_t size,
   migration_source = source;
   heap_size_pages = size;
   if (verbose > 0) {
-    printf("DEBUG: migration setup done\n");
+    fprintf(stderr,"DEBUG: migration setup done\n");
   }
   current_setup_val=true;
   __atomic_store(&setup_done,&current_setup_val, __ATOMIC_SEQ_CST);
   if (offset > 0) {
-    if (verbose > 0) {
-      printf("DEBUG: triggering premigration to 0x%lx\n", offset);
-    }
     struct migration_dst *premigration_dst =
-        select_dst_from_addr(MIGRATION_ENGINE_SW, offset);
+        //select_dst_from_addr(MIGRATION_ENGINE_SW, offset);
+        sw_dsts;
+    if (verbose > 0) {
+      fprintf(stderr,"DEBUG: triggering premigration to 0x%lx\n", premigration_dst->start);
+    }
     trigger_migration(*premigration_dst, MIGRATION_ENGINE_SW,
                       MIGRATION_MODE_SYNC);
+    if (verbose > 0) {
+      fprintf(stderr,"DEBUG: premigration to 0x%lx done\n", premigration_dst->start);
+    }
   }
   return 0;
+}
+
+int start_periodic_migration_tool(void) {
+    int res = 0;
+    pid_t tool_pid=0;
+    FILE *tool_pid_file=fopen("/tmp/periodic_migration","r");
+    if (tool_pid_file == NULL) {
+        fprintf(stderr,"/tmp/periodic_migration not found, skipping signal\n");
+        return 0;
+    }
+    FILE *my_pid_file = fopen("/tmp/bmark_to_migrate", "w+");
+    if (my_pid_file == NULL) {
+        perror("cannot create /tmp/bmark_to_migrate");
+        exit(-1);
+    }
+    fprintf(my_pid_file, "%d", getpid());
+    fflush(my_pid_file);
+    fclose(my_pid_file);
+    res=fscanf(tool_pid_file, "%d", &tool_pid);
+    fclose(tool_pid_file);
+    printf("Restarting periodic migration (sending signal %d) process with PID: %d\n",RESTART_SIGNAL,tool_pid);
+    res = kill(tool_pid, RESTART_SIGNAL);
+    return res;
 }
 
 void destroy_migration_handler(void) {
@@ -352,6 +391,7 @@ void destroy_migration_handler(void) {
       fprintf(stderr,"WARN: attempting to dsaible migration handler when not setup\n");
       return;
   }
+  unlink("/tmp/bmark_to_migrate");
   res = sigemptyset(&mask);
   if (res < 0) {
     perror("ERROR: Cannot empty signal mask while removing up locusta signal "

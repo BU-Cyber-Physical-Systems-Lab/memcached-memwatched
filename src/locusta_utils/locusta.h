@@ -1,9 +1,12 @@
 #ifndef LOCUSTA_H_
 #define LOCUSTA_H_
 #include <stddef.h>
+#include <stdint.h>
 
 /// The base signal to use for migration
 #define MIGRATION_SIGNAL SIGRTMIN
+/// Signal for restarting the periodic_migration process
+#define RESTART_SIGNAL SIGRTMAX
 /// Number of dummy signals
 #define DUMMY_SIGNALS 1
 /// Max number of software migration destinations
@@ -29,5 +32,9 @@ int setup_migration(void *source, size_t offset, size_t size,int verbose);
 
 /// Disables the migration handler
 void destroy_migration_handler(void);
+
+/// Sync with the periodic migration tool, ensuring migrations start after setup
+/// is done (requires periodic_migration to start before benchmark with -w flag)
+int start_periodic_migration_tool(void);
 
 #endif // LOCUSTA_H_

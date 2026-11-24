@@ -11,7 +11,7 @@ index 68b9b79..e20368c 100644
                     ///< validity checks)
  };
 diff --git a/generator/include/memory_watcher.h b/generator/include/memory_watcher.h
-index 64c30ca..71079f4 100644
+index 64c30ca..7ed80d1 100644
 --- a/generator/include/memory_watcher.h
 +++ b/generator/include/memory_watcher.h
 @@ -19,10 +19,11 @@
@@ -22,7 +22,7 @@ index 64c30ca..71079f4 100644
   */
 -void start_memory_watcher(size_t heap_size, void *heap_start,
 -                          const char *heap_file);
-+void *start_memory_watcher(size_t heap_size, void *heap_start,
++void *start_memory_watcher(size_t heap_size, size_t heap_start,
 +                           const char *heap_file);
  
  ///@brief Stops the memory watcher.
@@ -30,6 +30,22 @@ index 64c30ca..71079f4 100644
 -#endif
 +#endif
 \ No newline at end of file
+diff --git a/generator/include/periodic_benchmark.h b/generator/include/periodic_benchmark.h
+index 510989f..2b0b516 100644
+--- a/generator/include/periodic_benchmark.h
++++ b/generator/include/periodic_benchmark.h
+@@ -37,9 +37,9 @@ struct execution_options {
+   long period_nsec;       ///<  The period in nanoseconds.
+   char *output_path;      ///< Path where the execution info will be written.
+   size_t
+-      heap_size; ///< The heap memory that will  will act as a limit for dynamic
++      heap_size, ///< The heap memory that will  will act as a limit for dynamic
+                  ///< memory requested during the benchmark execution.
+-  void *heap_address; ///< The user specified physical address of the heap,
++  heap_address; ///< The user specified physical address of the heap,
+                       ///< cannot be used with `heap_file`.
+   const char *heap_file_path; ///< The user specified file for backing heap.
+                               ///< cannot be used with `heap_address`. No need
 diff --git a/generator/include/signal_utils.h b/generator/include/signal_utils.h
 index 80d815b..d4da2fb 100644
 --- a/generator/include/signal_utils.h
@@ -123,11 +139,32 @@ diff --git a/generator/src/dlmalloc b/generator/src/dlmalloc
 @@ -1 +1 @@
 -Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3
 +Subproject commit 8a73d769483b2f87f74f4f441245f98d5d8860d3-dirty
+diff --git a/generator/src/main.c b/generator/src/main.c
+index 31348c9..cff7d68 100644
+--- a/generator/src/main.c
++++ b/generator/src/main.c
+@@ -100,7 +100,7 @@ int main(int argc, char** argv)
+     elogf(LOG_LEVEL_TRACE, "\toutput path: %s\n", parsed_args->output_path);
+     elogf(LOG_LEVEL_TRACE, "\tmemory to preallocate (in bytes):%zu\n",
+         parsed_args->heap_size);
+-    elogf(LOG_LEVEL_TRACE, "\tfixed heap address: %p\n",
++    elogf(LOG_LEVEL_TRACE, "\tfixed heap address: 0x%lx\n",
+         parsed_args->heap_address);
+     elogf(LOG_LEVEL_TRACE, "\tsynchonised start enabled: %d\n",
+         parsed_args->synch_start);
 diff --git a/generator/src/memory_watcher.c b/generator/src/memory_watcher.c
-index 1c2d310..7451353 100644
+index 1c2d310..27548b7 100644
 --- a/generator/src/memory_watcher.c
 +++ b/generator/src/memory_watcher.c
-@@ -25,6 +25,7 @@
+@@ -11,6 +11,7 @@
+  * contributors. SPDX-License-Identifier: MIT
+  */
+ #include "optional_features.h"
++#include <stdint.h>
+ #include <stdio.h>
+ #define _FILE_OFFSET_BITS 64
+ #include "logging.h"
+@@ -25,6 +26,7 @@
  #include <string.h>
  #include <sys/mman.h>
  #include <unistd.h>
@@ -135,7 +172,32 @@ index 1c2d310..7451353 100644
  
  /// The mask used to extract the present bit from a page table entry.
  #define PRES_MASK (1LL << 63)
-@@ -95,9 +96,9 @@ static struct memory_watcher_config {
+@@ -67,13 +69,13 @@ static struct memory_watcher_config {
+        * watcher is enabled and the heap location
+        *is fixed. */
+       *fixed_heap_program_break,
+-      /// The configured heap start. `NULL` if not configured.
+-      *heap_start,
+       /** The address that is the result of mmapping
+        * the file which will back the heap with the `heap_start` offset and
+        * `heap_size` length. This will be the address used
+        * for allocations. */
+       *mapping;
++      /// The configured heap start. `0` if not configured.
++      size_t heap_start;
+   int heap_fd,      ///< The file pointer that will back the heap.
+       pagemap_fd;   ///< The file pointer to the pagemap file.
+   size_t heap_size; ///< The configured heap size. `0` if not configured.
+@@ -82,7 +84,7 @@ static struct memory_watcher_config {
+     .status = MEMORY_WATCHER_DISABLED,
+     .initial_program_break = NULL,
+     .fixed_heap_program_break = NULL,
+-    .heap_start = NULL,
++    .heap_start = 0,
+     .heap_size = 0,
+     .mapping = NULL,
+     .heap_fd = -1,
+@@ -95,9 +97,9 @@ static struct memory_watcher_config {
   * page frame number and the present bit.
   */
  static void print_map(u64 map) {
@@ -148,7 +210,7 @@ index 1c2d310..7451353 100644
  }
  
  /**
-@@ -110,13 +111,13 @@ static void print_map(u64 map) {
+@@ -110,13 +112,13 @@ static void print_map(u64 map) {
   * the page size is 4KB and each entry in the pagemap file is 8 bytes long.
   * The page frame number is extracted from the pagemap entry and printed.
   * The present bit is also printed.
@@ -164,7 +226,7 @@ index 1c2d310..7451353 100644
        memory_watcher_config.pagemap_fd <= 0) {
      return 0;
    }
-@@ -132,7 +133,7 @@ static int translate_va(u64 vaddr) {
+@@ -132,7 +134,7 @@ static int translate_va(u64 vaddr) {
      return -1;
    }
  
@@ -173,13 +235,13 @@ index 1c2d310..7451353 100644
    print_map(map);
  
    return 0;
-@@ -165,11 +166,10 @@ static int translate_va(u64 vaddr) {
+@@ -165,11 +167,10 @@ static int translate_va(u64 vaddr) {
   * bytes to setup its internal datastructures, so the maximum amount of
   * memory that latency can use would be ~1900KB.
   */
 -void start_memory_watcher(size_t heap_size, void *heap_start,
 -                          const char *heap_file) {
-+void *start_memory_watcher(size_t heap_size, void *heap_start,
++void *start_memory_watcher(size_t heap_size, size_t heap_start,
 +                           const char *heap_file) {
    int res;
    size_t page_size = sysconf(_SC_PAGESIZE);
@@ -187,7 +249,7 @@ index 1c2d310..7451353 100644
    // correct value for the memory watcher to be enabled
    enum memory_watcher_states expected_state = MEMORY_WATCHER_DISABLED,
                               desired_state,
-@@ -194,12 +194,6 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+@@ -194,12 +195,6 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
      if (__atomic_compare_exchange(&(memory_watcher_config.status),
                                    &expected_state, &initializing_state, false,
                                    __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
@@ -200,7 +262,7 @@ index 1c2d310..7451353 100644
        // initialize mutex to 0, so other threads will need to wait for
        // initialization to be completed
        res = sem_init(&(memory_watcher_config.mutex), 0, 0);
-@@ -213,20 +207,20 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+@@ -213,21 +208,19 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
          elogf(LOG_LEVEL_TRACE,
                "Starting  memory watcher, bytes to preallocate: %zu.\n",
                heap_size);
@@ -208,6 +270,13 @@ index 1c2d310..7451353 100644
 -        res = mallopt(M_TOP_PAD, heap_size);
 -        if (res == 0) {
 -          elogf(LOG_LEVEL_ERR, "Cannot preallocate %zu bytes.\n", heap_size);
+-          exit(-1);
+-        }
+-        // a dummy allocation to have malloc preallocate the requested amount of
+-        // memory.
+-        dummy_alloc = malloc(heap_size);
+-        if (dummy_alloc == NULL) {
+-          elogf(LOG_LEVEL_ERR, "Cannot allocate dynamic memory, aborting.\n");
 +        // create an anonymous mapping for the heap
 +        memory_watcher_config.mapping = (mem_watcher_address_t *)mmap(
 +            NULL, heap_size, PROT_READ | PROT_WRITE,
@@ -216,22 +285,16 @@ index 1c2d310..7451353 100644
 +          perror("Cannot mmap  heap to private location, aborting.\n");
            exit(-1);
          }
--        // a dummy allocation to have malloc preallocate the requested amount of
--        // memory.
--        dummy_alloc = malloc(heap_size);
--        if (dummy_alloc == NULL) {
--          elogf(LOG_LEVEL_ERR, "Cannot allocate dynamic memory, aborting.\n");
-+				elogf(LOG_LEVEL_INFO,"setting up migration handler\n");
-+				res=setup_migration(memory_watcher_config.mapping,(size_t)heap_start,heap_size/getpagesize(),0);
-+				if (res < 0) {
-           exit(-1);
-         }
 -        free(dummy_alloc);
-+				elogf(LOG_LEVEL_INFO,"migration handler ready\n");
++        elogf(LOG_LEVEL_TRACE,"Mapped heap for memory watcher\n");
        } else {
++        elogf(LOG_LEVEL_ERR,
++              "Cannot have file-bakced heap with locusta migration!\n");
++				exit(-1);
          // open the file that will back the heap
          memory_watcher_config.heap_fd = open(heap_file, O_RDWR);
-@@ -238,7 +232,7 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+         if (memory_watcher_config.heap_fd < 0) {
+@@ -238,7 +231,7 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
          // map a region of `/dev/dem`, starting from `heap_start` and of size
          // `heap_size`
  
@@ -240,7 +303,12 @@ index 1c2d310..7451353 100644
          // Considering we are addressing `/dev/mem` which has a view of all the
          // physical memory this is conceptually sound. This could create
          // problems with fixed heap sizes and memory that is not 1 byte
-@@ -253,20 +247,19 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+@@ -249,24 +242,23 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+         memory_watcher_config.mapping = (mem_watcher_address_t *)mmap(
+             NULL, heap_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
+             memory_watcher_config.heap_fd,
+-            ((off_t)heap_start & ~(page_size - 1)));
++            (heap_start & ~(page_size - 1)));
          if (memory_watcher_config.mapping == MAP_FAILED) {
            perror("Cannot mmap heap file to fix heap location, aborting.\n");
            close(memory_watcher_config.heap_fd);
@@ -248,43 +316,53 @@ index 1c2d310..7451353 100644
            exit(-1);
          }
          // add the 12 bits that we masked to make the mapping page-aligned.
-         memory_watcher_config.mapping += ((off_t)heap_start & (page_size - 1));
+-        memory_watcher_config.mapping += ((off_t)heap_start & (page_size - 1));
 -        memory_watcher_config.heap_start = (mem_watcher_address_t *)heap_start;
 -        memory_watcher_config.fixed_heap_program_break =
 -            memory_watcher_config.mapping;
++        memory_watcher_config.mapping += (heap_start & (page_size - 1));
          if (strncmp(heap_file, "/dev/mem", 8) == 0) {
-           elogf(LOG_LEVEL_TRACE, "Fixed heap enabled.\n");
+-          elogf(LOG_LEVEL_TRACE, "Fixed heap enabled.\n");
++          elogf(LOG_LEVEL_TRACE, "Fixed heap enabled with offset 0x%lx.\n",heap_start);
          } else {
            elogf(LOG_LEVEL_TRACE, "File backed heap enabled.\n");
          }
        }
-+      memory_watcher_config.heap_start = (mem_watcher_address_t *)heap_start;
++      memory_watcher_config.heap_start = heap_start;
 +      memory_watcher_config.fixed_heap_program_break =
 +          memory_watcher_config.mapping;
        memory_watcher_config.heap_size = heap_size;
        memory_watcher_config.initial_program_break =
            (mem_watcher_address_t *)sbrk(0);
-@@ -282,6 +275,18 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
-         perror("Cannot find the program break during memory "
+@@ -283,6 +275,12 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
                 "watcher setup.");
          exit(-1);
-+      }
-+			memset(memory_watcher_config.mapping,0,heap_size);
+       }
 +      // disable mmap usage
 +      res = mallopt(M_MMAP_MAX, 0);
 +      if (res == 0) {
 +        elogf(LOG_LEVEL_ERR, "Cannot disable mmap based allocation.\n");
 +        exit(-1);
 +      }
-+      res = mlockall(MCL_CURRENT | MCL_FUTURE);
-+      if (res < 0) {
-+        perror("Cannot lock memory watcher preallocated memory");
-+        exit(-1);
-       }
        res = sem_post(&(memory_watcher_config.mutex));
        if (res < 0) {
-@@ -315,14 +320,15 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+         perror("Cannot post on memory watcher mutex during init");
+@@ -313,16 +311,29 @@ void start_memory_watcher(size_t heap_size, void *heap_start,
+           heap_size);
+     exit(-1);
    }
++  res = mlockall(MCL_CURRENT | MCL_FUTURE);
++  elogf(LOG_LEVEL_INFO,"locking memory buffer\n");
++  if (res < 0) {
++      perror("Cannot lock memory watcher preallocated memory");
++      exit(-1);
++  }
++  elogf(LOG_LEVEL_INFO,"setting up migration handler\n");
++  res=setup_migration(memory_watcher_config.mapping,memory_watcher_config.heap_start,memory_watcher_config.heap_size/getpagesize(),0);
++  if (res < 0) {
++      exit(-1);
++  }
++  elogf(LOG_LEVEL_INFO,"migration handler ready\n");
    // open the pagemap file to translate virtual addresses to physical
    // ones
 -  if (benchmark_verbosity >= LOG_LEVEL_DEBUG) {
@@ -301,7 +379,7 @@ index 1c2d310..7451353 100644
  }
  
  /**
-@@ -341,6 +347,7 @@ void stop_memory_watcher() {
+@@ -341,6 +352,7 @@ void stop_memory_watcher() {
    __atomic_exchange(&(memory_watcher_config.status), &disabled_status,
                      &current_status, __ATOMIC_SEQ_CST);
    if (current_status >= MEMORY_WATCHER_ENABLED) {
@@ -309,7 +387,7 @@ index 1c2d310..7451353 100644
      res = sem_getvalue(&(memory_watcher_config.mutex), &semval);
      if (res < 0) {
        perror("Cannot get memory watcher mutex value during teardown (1st)");
-@@ -423,8 +430,8 @@ extern void *dlmalloc(size_t size);
+@@ -423,8 +435,8 @@ extern void *dlmalloc(size_t size);
   */
  void *__wrap_malloc(size_t size) {
    int res;
@@ -320,7 +398,7 @@ index 1c2d310..7451353 100644
    enum memory_watcher_states current_status;
    __atomic_load(&(memory_watcher_config.status), &current_status,
                  __ATOMIC_SEQ_CST);
-@@ -443,38 +450,16 @@ void *__wrap_malloc(size_t size) {
+@@ -443,38 +455,16 @@ void *__wrap_malloc(size_t size) {
                                  ? dlmalloc
                                  : __real_malloc;
  
@@ -363,7 +441,7 @@ index 1c2d310..7451353 100644
    if (translate_va((u64)pointer) < 0) {
      elogf(LOG_LEVEL_ERR, "Cannot translate pointer %p\n", pointer);
      sem_post(&(memory_watcher_config.mutex));
-@@ -520,7 +505,7 @@ void *__wrap_mmap(void *addr, size_t len, int prot, int flags, int fildes,
+@@ -520,7 +510,7 @@ void *__wrap_mmap(void *addr, size_t len, int prot, int flags, int fildes,
   * only be called by our wrapped malloc / free, inside their critical section.
   */
  void *rtbench_sbrk(intptr_t offset) {
@@ -372,7 +450,7 @@ index 1c2d310..7451353 100644
          "wrapped sbrk with offset %ld, memory watcher status: %d\n", offset,
          memory_watcher_config.status);
    void *pointer = NULL;
-@@ -528,6 +513,7 @@ void *rtbench_sbrk(intptr_t offset) {
+@@ -528,6 +518,7 @@ void *rtbench_sbrk(intptr_t offset) {
    __atomic_load(&(memory_watcher_config.status), &current_status,
                  __ATOMIC_SEQ_CST);
    switch (current_status) {
@@ -380,7 +458,7 @@ index 1c2d310..7451353 100644
    case MEMORY_WATCHER_FILE_HEAP:
    case MEMORY_WATCHER_FIXED_HEAP:
      // with a positive increment we need to check if the new program break is
-@@ -550,7 +536,7 @@ void *rtbench_sbrk(intptr_t offset) {
+@@ -550,7 +541,7 @@ void *rtbench_sbrk(intptr_t offset) {
      pointer = memory_watcher_config.fixed_heap_program_break;
      memory_watcher_config.fixed_heap_program_break +=
          offset; // modify the current program break
@@ -389,7 +467,7 @@ index 1c2d310..7451353 100644
            memory_watcher_config.fixed_heap_program_break);
      break;
    case MEMORY_WATCHER_DISABLED:
-@@ -561,25 +547,11 @@ void *rtbench_sbrk(intptr_t offset) {
+@@ -561,25 +552,11 @@ void *rtbench_sbrk(intptr_t offset) {
      pointer = (void *)-1;
      break;
    case MEMORY_WATCHER_INITIALIZING:
@@ -416,7 +494,7 @@ index 1c2d310..7451353 100644
    default:
      elogf(LOG_LEVEL_ERR, "Invalid memory watcher status: %d.\n",
            memory_watcher_config.status);
-@@ -588,7 +560,7 @@ void *rtbench_sbrk(intptr_t offset) {
+@@ -588,7 +565,7 @@ void *rtbench_sbrk(intptr_t offset) {
      break;
    }
  
@@ -425,7 +503,7 @@ index 1c2d310..7451353 100644
    if (translate_va((u64)memory_watcher_config.fixed_heap_program_break) < 0) {
      elogf(LOG_LEVEL_ERR, "Cannot translate pointer %p\n", pointer);
      exit(-1);
-@@ -612,7 +584,7 @@ extern void dlfree(void *ptr);
+@@ -612,7 +589,7 @@ extern void dlfree(void *ptr);
  void __wrap_free(void *ptr) {
    enum memory_watcher_states current_status;
    int res;
@@ -434,7 +512,7 @@ index 1c2d310..7451353 100644
    if (translate_va((u64)ptr) < 0) {
      elogf(LOG_LEVEL_ERR, "Cannot translate pointer %p\n", ptr);
      exit(-1);
-@@ -640,6 +612,131 @@ void __wrap_free(void *ptr) {
+@@ -640,6 +617,131 @@ void __wrap_free(void *ptr) {
        perror("Cannot post on memory watcher mutex during malloc");
        exit(-1);
      }
@@ -569,18 +647,20 @@ index 1c2d310..7451353 100644
  }
 \ No newline at end of file
 diff --git a/generator/src/parsing.c b/generator/src/parsing.c
-index e62e37a..aef7e14 100644
+index e62e37a..78fb983 100644
 --- a/generator/src/parsing.c
 +++ b/generator/src/parsing.c
 @@ -263,14 +263,13 @@ int interpret_opt(int key, const char *arg, struct argp_state *state) {
      break;
    case 'H':
      if (arg != NULL) {
-+        parsed_args->heap_address = (void *)strtoull(arg, NULL, 0);
++        parsed_args->heap_address = (size_t)strtoul(arg, NULL, 0);
        if (arg[0] == '0' && arg[1] == 'x') {
-         elogf(LOG_LEVEL_TRACE, "using /dev/mem to back the heap\n");
+-        elogf(LOG_LEVEL_TRACE, "using /dev/mem to back the heap\n");
 -        parsed_args->heap_address = (void *)strtoull(arg, NULL, 0);
-         parsed_args->heap_file_path = "/dev/mem";
+-        parsed_args->heap_file_path = "/dev/mem";
++        //elogf(LOG_LEVEL_TRACE, "using /dev/mem to back the heap\n");
++       // parsed_args->heap_file_path = "/dev/mem";
        } else {
          elogf(LOG_LEVEL_TRACE, "using %s to back the heap\n", arg);
          parsed_args->heap_file_path = arg;
@@ -588,6 +668,44 @@ index e62e37a..aef7e14 100644
        }
      }
      if (res < 0 || errno != 0) {
+@@ -450,7 +449,7 @@ int parse_opt(int key, char *arg, struct argp_state *state) {
+     memset(parsed_args, 0, sizeof(struct execution_options));
+     CPU_ZERO(&parsed_args->core_affinity);
+     parsed_args->prio = 100;
+-    parsed_args->heap_address = NULL;
++    parsed_args->heap_address = 0;
+     CPU_ZERO(&parsed_args->memory_profiling_core_affinity);
+     parsed_args->memory_profiling_time_bucket = 10000000;
+     parsed_args->output_path = NULL;
+@@ -489,7 +488,7 @@ int parse_opt(int key, char *arg, struct argp_state *state) {
+       argp_error(state,
+                  "--sched-period must be provided for SCHED_DEADLINE policy.");
+     }
+-    if (parsed_args->heap_address != NULL && parsed_args->heap_size == 0) {
++    if (parsed_args->heap_address != 0 && parsed_args->heap_size == 0) {
+       argp_error(state,
+                  "using a specific heap address requires a memory limit");
+     }
+diff --git a/generator/src/periodic_benchmark.c b/generator/src/periodic_benchmark.c
+index afa2390..cf277b8 100644
+--- a/generator/src/periodic_benchmark.c
++++ b/generator/src/periodic_benchmark.c
+@@ -31,6 +31,7 @@
+ #include <sys/mman.h>
+ #include <time.h>
+ #include <unistd.h>
++#include "locusta.h"
+ 
+ /// This value in `::deadline_timer_status` determines that the deadline timer
+ /// must be used
+@@ -581,6 +582,7 @@ int periodic_benchmark(struct execution_options *exec_opts) {
+     elogf(LOG_LEVEL_TRACE, "Period timer setup complete\n");
+     elogf(LOG_LEVEL_TRACE, "Timers setup complete\n");
+   }
++	start_periodic_migration_tool();
+   // since timer will start shortly there are no previous jobs that are
+   // executing we get the timestamp of the first period
+   // This cycle will proceed infinitely if the user has not set a specific
 diff --git a/image-filters b/image-filters
 --- a/image-filters
 +++ b/image-filters

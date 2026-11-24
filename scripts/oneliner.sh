@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #$1: subfolder of each experiment
 #$2: ssh target (i.e. "root@10.210.1.187" or "daniele")
-#$3 board name
-#$4 list of benchmarks to use
+#$3 list of benchmarks to use
+#$4 board name
 set -euo pipefail
 declare -a experiments
 declare script_dir
